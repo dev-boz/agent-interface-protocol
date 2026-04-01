@@ -4,9 +4,7 @@
 
 > **Status: Work in Progress** — the core works and has 195 passing tests, but this is early-stage. Contributions, feedback, and new backend adapters are very welcome.
 
-AIP explores a hypothesis: **multi-agent orchestration doesn't need new infrastructure.** tmux already solves process management, inter-process communication, and session persistence. The filesystem already solves state. LLMs can already parse each other's natural-language output, so protocol normalization between agents may be unnecessary.
-
-The bet is that you can replace message brokers, agent frameworks, and custom transport layers with things Unix gave us decades ago — and get something simpler, more debuggable, and vendor-neutral.
+Provider-agnostic multi-agent orchestration with near-zero infrastructure. tmux handles process management, inter-process communication, and session persistence. A shared MCP server and filesystem workspace handle coordination. LLMs can already parse each other's natural-language output, so protocol normalization between agents may be unnecessary.
 
 ## The Idea
 
