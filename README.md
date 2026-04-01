@@ -1,4 +1,4 @@
-# agent-nexus — Agent Teams Mux
+# Agent Interface Protocol (AIP)
 
 Multi-agent orchestration using tmux, a shared filesystem workspace, and one MCP server. Zero infrastructure, zero frameworks, zero servers.
 
@@ -23,10 +23,10 @@ aip agent list
 
 ## Installation
 
-agent-nexus is a small Python package with one runtime Python dependency: the `mcp` SDK used by `aip-mcp`.
+AIP is a small Python package with one runtime Python dependency: the `mcp` SDK used by `aip-mcp`.
 
 ```bash
-cd /home/dinkum/projects/agent-nexus
+cd /path/to/agent-interface-protocol
 pip install -e .          # installs `aip` and `aip-mcp` commands
 pip install -e '.[dev]'   # also installs pytest for development
 ```
@@ -175,7 +175,7 @@ aip agent send coder "/export" --no-enter    # send without pressing Enter
 
 ### `aip agent kill <target>`
 
-Gracefully stop an agent subtree. agent-nexus shuts down descendants first, captures recent pane output into a handoff summary when useful, re-queues any claimed tasks back to `pending/`, and then removes tmux windows.
+Gracefully stop an agent subtree. AIP shuts down descendants first, captures recent pane output into a handoff summary when useful, re-queues any claimed tasks back to `pending/`, and then removes tmux windows.
 
 ```bash
 aip agent kill coder
@@ -344,7 +344,7 @@ Hook-capable workers should use hooks for lifecycle/status telemetry. `report_st
 
 ### Tools
 
-agent-nexus exposes the full 8-tool coordination surface described in the project spec.
+AIP exposes the full 8-tool coordination surface described in the project spec.
 
 Every tool call automatically appends a one-line JSON event to `workspace/events.jsonl`.
 
@@ -869,7 +869,7 @@ tmux attach -t aip
 Orchestrator reads errors in plain English ("quota exceeded", "rate limited"). It spawns a replacement on a different model and redirects the task. When the original recovers, bring it back.
 
 ### Network/Auth Failures
-Vendor auth, quota, or credit failures are environment-specific, not agent-nexus bugs. agent-nexus treats any CLI agent identically once it can run in a terminal and load either hooks, MCP, or both.
+Vendor auth, quota, or credit failures are environment-specific, not AIP bugs. AIP treats any CLI agent identically once it can run in a terminal and load either hooks, MCP, or both.
 
 ---
 
@@ -878,7 +878,7 @@ Vendor auth, quota, or credit failures are environment-specific, not agent-nexus
 ### Running Tests
 
 ```bash
-cd /home/dinkum/projects/agent-nexus
+cd /path/to/agent-interface-protocol
 PYTHONPATH=. python -m pytest -q tests/
 ```
 
@@ -924,9 +924,9 @@ PYTHONPATH=. python -m pytest -q tests/
 
 ## ACP/A2A Compatibility
 
-agent-nexus MCP tools map cleanly to both protocols:
+AIP MCP tools map cleanly to both protocols:
 
-| agent-nexus Tool | ACP Equivalent | A2A Equivalent |
+| AIP Tool | ACP Equivalent | A2A Equivalent |
 |---|---|---|
 | `report_status` | Task status events | Task status updates |
 | `register_capabilities` | Agent description | Agent Card |
@@ -941,9 +941,9 @@ Future: add `ANEX_ACP_COMPAT=true` flag to emit ACP-formatted events alongside f
 
 ---
 
-## What agent-nexus Replaces
+## What AIP Replaces
 
-| Traditional Approach | agent-nexus Equivalent |
+| Traditional Approach | AIP Equivalent |
 |---|---|
 | ACP protocol | 8 MCP tools |
 | SSE streaming | tmux pane buffer |

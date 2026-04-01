@@ -1,11 +1,11 @@
 #!/bin/bash
-# agent-nexus Live Demo
+# AIP Live Demo
 # Demonstrates full orchestration cycle with real tmux agents
 
 set -e
 
 echo "============================================================"
-echo "agent-nexus Live Demo: Multi-Agent Orchestration"
+echo "AIP Live Demo: Multi-Agent Orchestration"
 echo "============================================================"
 echo ""
 echo "This demo shows:"
@@ -20,10 +20,10 @@ read
 
 # Initialize
 echo ""
-echo "📦 Initializing agent-nexus..."
+echo "📦 Initializing AIP..."
 python -m aip init --ensure-session
 echo "✓ Workspace created"
-echo "✓ tmux session 'anex' created"
+echo "✓ tmux session 'aip' created"
 echo ""
 echo "Press Enter to continue..."
 read
@@ -194,6 +194,6 @@ echo "  - cat workspace/events.jsonl | jq    # View event log"
 echo "  - cat workspace/summaries/coder-*.md    # Read agent output"
 echo ""
 echo "To cleanup:"
-echo "  - tmux kill-session -t anex"
+echo "  - tmux kill-session -t aip"
 echo "  - rm -rf workspace"
 echo ""

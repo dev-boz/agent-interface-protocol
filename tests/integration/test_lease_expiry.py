@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-def run_atmux(args):
+def run_aip(args):
     """Run aip command and return parsed JSON output."""
     result = subprocess.run(
         ["python3", "-m", "aip"] + args,
@@ -68,7 +68,7 @@ def main():
 
     # Claim with very short lease (2 seconds)
     print("\n2. Claiming task with 2-second lease...")
-    result = run_atmux(["task", "claim", "task-002", "short-lived-agent", "--lease-seconds", "2"])
+    result = run_aip(["task", "claim", "task-002", "short-lived-agent", "--lease-seconds", "2"])
     print(f"   ✓ Claimed by {result['claimed_by']}")
 
     # Wait for lease to expire
@@ -78,12 +78,12 @@ def main():
 
     # Reclaim expired tasks
     print("\n4. Reclaiming expired tasks...")
-    result = run_atmux(["task", "reclaim-expired"])
+    result = run_aip(["task", "reclaim-expired"])
     print(f"   ✓ Reclaimed {len(result['reclaimed'])} task(s): {result['reclaimed']}")
 
     # Verify task is back in pending
     print("\n5. Verifying task is back in pending...")
-    pending = run_atmux(["task", "list", "--stage", "pending"])
+    pending = run_aip(["task", "list", "--stage", "pending"])
     task_ids = [t["task_id"] for t in pending]
     assert "task-002" in task_ids
     print(f"   ✓ Task-002 is back in pending")

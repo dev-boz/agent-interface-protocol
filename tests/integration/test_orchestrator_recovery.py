@@ -10,7 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
-def run_atmux(args):
+def run_aip(args):
     """Run aip command and return parsed JSON output."""
     result = subprocess.run(
         ["python3", "-m", "aip"] + args,
@@ -91,13 +91,13 @@ def main():
     print("✓ Orchestrator-1 created 3 tasks")
 
     # Spawn worker agents
-    run_atmux(["agent", "spawn", "worker-1", "bash"])
-    run_atmux(["agent", "spawn", "worker-2", "bash"])
+    run_aip(["agent", "spawn", "worker-1", "bash"])
+    run_aip(["agent", "spawn", "worker-2", "bash"])
     print("✓ Orchestrator-1 spawned 2 worker agents")
 
     # Workers claim tasks
-    run_atmux(["task", "claim", "task-005", "worker-1"])
-    run_atmux(["task", "claim", "task-006", "worker-2"])
+    run_aip(["task", "claim", "task-005", "worker-1"])
+    run_aip(["task", "claim", "task-006", "worker-2"])
     print("✓ Workers claimed tasks")
 
     # Workers report status
@@ -123,7 +123,7 @@ def main():
     print("✓ Workspace files intact")
 
     # Verify agents are still there
-    agents = run_atmux(["agent", "list"])
+    agents = run_aip(["agent", "list"])
     agent_names = [a['name'] for a in agents]
     assert "worker-1" in agent_names
     assert "worker-2" in agent_names
@@ -150,9 +150,9 @@ def main():
             print(f"    - {status['agent']}: {status['status']} - {status.get('message', 'N/A')}")
 
     # Check task queue state
-    pending = run_atmux(["task", "list", "--stage", "pending"])
-    claimed = run_atmux(["task", "list", "--stage", "claimed"])
-    done = run_atmux(["task", "list", "--stage", "done"])
+    pending = run_aip(["task", "list", "--stage", "pending"])
+    claimed = run_aip(["task", "list", "--stage", "claimed"])
+    done = run_aip(["task", "list", "--stage", "done"])
     print(f"\n✓ Orchestrator-2 checked task queue:")
     print(f"    - Pending: {len(pending)} tasks")
     print(f"    - Claimed: {len(claimed)} tasks")
@@ -167,7 +167,7 @@ def main():
         "content": "## User Registration\n\nImplemented registration endpoint with email verification.",
         "task_id": "task-005"
     })
-    run_atmux(["task", "complete", "task-005", "--agent-name", "worker-1"])
+    run_aip(["task", "complete", "task-005", "--agent-name", "worker-1"])
     send_mcp_tool_call("worker-1", "report_status", {
         "status": "idle",
         "message": "registration complete, ready for next task"
@@ -175,10 +175,10 @@ def main():
     print("✓ Worker-1 completed task-005")
 
     # Orchestrator-2 assigns the remaining task to worker-1
-    remaining_pending = run_atmux(["task", "list", "--stage", "pending"])
+    remaining_pending = run_aip(["task", "list", "--stage", "pending"])
     if remaining_pending:
         task_id = remaining_pending[0]['task_id']
-        run_atmux(["task", "claim", task_id, "worker-1"])
+        run_aip(["task", "claim", task_id, "worker-1"])
         print(f"✓ Orchestrator-2 assigned {task_id} to worker-1")
 
     # Phase 5: Verify recovery was seamless
@@ -190,9 +190,9 @@ def main():
     print(f"✓ Event log grew: {len(events)} → {len(final_events)} events")
 
     # Check all tasks are accounted for
-    pending = run_atmux(["task", "list", "--stage", "pending"])
-    claimed = run_atmux(["task", "list", "--stage", "claimed"])
-    done = run_atmux(["task", "list", "--stage", "done"])
+    pending = run_aip(["task", "list", "--stage", "pending"])
+    claimed = run_aip(["task", "list", "--stage", "claimed"])
+    done = run_aip(["task", "list", "--stage", "done"])
     total = len(pending) + len(claimed) + len(done)
     print(f"✓ All tasks accounted for: {total} tasks")
     print(f"    - Pending: {len(pending)}")
@@ -206,8 +206,8 @@ def main():
     # Cleanup
     print("\n🧹 Cleanup")
     print("-" * 60)
-    run_atmux(["agent", "kill", "worker-1"])
-    run_atmux(["agent", "kill", "worker-2"])
+    run_aip(["agent", "kill", "worker-1"])
+    run_aip(["agent", "kill", "worker-2"])
     print("✓ Cleaned up worker agents")
 
     print("\n" + "=" * 60)

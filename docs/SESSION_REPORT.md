@@ -1,4 +1,4 @@
-# agent-nexus Testing Complete — Session Report
+# Agent Interface Protocol (AIP) Testing Complete — Session Report
 
 **Date**: 2026-03-18
 **Session Duration**: ~45 minutes
@@ -29,7 +29,7 @@
 
 ## Executive Summary
 
-agent-nexus successfully demonstrates that multi-agent orchestration can be built entirely on Unix primitives (tmux + filesystem) with **zero infrastructure**. All core functionality has been tested and verified working.
+AIP successfully demonstrates that multi-agent orchestration can be built entirely on Unix primitives (tmux + filesystem) with **zero infrastructure**. All core functionality has been tested and verified working.
 
 **Key Achievement**: The system replaces traditional agent frameworks (ACP protocols, message brokers, service discovery, job queues) with 5 MCP tools and tmux commands.
 
@@ -103,8 +103,8 @@ agent-nexus successfully demonstrates that multi-agent orchestration can be buil
 | Event log | `events.jsonl` | `tail -n 50` | Yes |
 | Cold | workspace files | `cat` | Yes |
 
-### What agent-nexus Replaces ✅
-| Traditional | agent-nexus |
+### What AIP Replaces ✅
+| Traditional | AIP |
 |-------------|-------|
 | ACP protocol | 5 MCP tools |
 | SSE streaming | tmux pane buffer |
@@ -171,7 +171,7 @@ agent-nexus successfully demonstrates that multi-agent orchestration can be buil
 
 ### Documentation
 - `README.md` — Complete user documentation
-- `agent-nexus.md` — Architecture deep-dive
+- `AIP.md` — Architecture deep-dive
 - `TESTING_SUMMARY.md` — Test results and findings
 - `SESSION_REPORT.md` — This document
 
@@ -245,7 +245,7 @@ Add to each agent's config (e.g., `~/.gemini/settings.json`):
 
 ### 3. Create Orchestrator Prompt
 ```
-You are an orchestrator managing a team of specialist agents via agent-nexus.
+You are an orchestrator managing a team of specialist agents via AIP.
 
 Your tools:
 - Read event log: tail -n 50 workspace/events.jsonl
@@ -283,7 +283,7 @@ tmux attach -t aip
 
 ## Conclusion
 
-agent-nexus successfully proves that **AI agents are Unix processes** and Unix already solved process orchestration. The system is production-ready for the core use case: coordinating multiple CLI agents via shared workspace and tmux.
+AIP successfully proves that **AI agents are Unix processes** and Unix already solved process orchestration. The system is production-ready for the core use case: coordinating multiple CLI agents via shared workspace and tmux.
 
 **The key insight holds**: Instead of building new infrastructure (protocols, servers, brokers), we use what already works (tmux, filesystem, POSIX atomics).
 

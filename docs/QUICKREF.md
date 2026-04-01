@@ -1,4 +1,4 @@
-# agent-nexus Quick Reference Card
+# Agent Interface Protocol (AIP) Quick Reference Card
 
 ## Essential Commands
 
@@ -331,7 +331,7 @@ cat workspace/tasks/claimed/coder-task-042.md
 ## Installation
 
 ```bash
-cd /path/to/agent-nexus
+cd /path/to/AIP
 pip install -e .          # installs aip and aip-mcp commands
 pip install -e '.[dev]'   # also installs pytest for development
 ```
@@ -383,9 +383,9 @@ For MCP-only CLIs, add `aip-mcp` manually:
 
 ---
 
-## What agent-nexus Replaces
+## What AIP Replaces
 
-| Traditional | agent-nexus |
+| Traditional | AIP |
 |-------------|-------|
 | ACP protocol | Selective MCP tools + hooks |
 | SSE streaming | tmux pane buffer |
@@ -399,7 +399,7 @@ For MCP-only CLIs, add `aip-mcp` manually:
 
 ---
 
-**For full documentation, see README.md and agent-nexus.md**
+**For full documentation, see README.md and AIP.md**
 
 ---
 

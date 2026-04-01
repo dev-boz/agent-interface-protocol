@@ -1,9 +1,9 @@
-# agent-nexus File Organization
+# Agent Interface Protocol (AIP) File Organization
 
 ## Directory Structure
 
 ```
-agent-nexus/
+AIP/
 ├── README.md                    # Main documentation (start here)
 ├── pyproject.toml              # Package configuration
 │
@@ -157,7 +157,7 @@ cat docs/FILE_ORGANIZATION.md
 ## Installation
 
 ```bash
-cd /path/to/agent-nexus
+cd /path/to/AIP
 pip install -e .          # installs aip and aip-mcp commands
 pip install -e '.[dev]'   # also installs pytest for development
 ```
@@ -178,7 +178,7 @@ pip install -e '.[dev]'   # also installs pytest for development
 
 **Before**:
 ```
-agent-nexus/
+AIP/
 ├── test_*.py (6 files at root)
 ├── *.sh (3 files at root)
 ├── *.md (4 files at root)
@@ -187,7 +187,7 @@ agent-nexus/
 
 **After**:
 ```
-agent-nexus/
+AIP/
 ├── tests/
 │   ├── (unit tests)
 │   └── integration/ (integration tests)

@@ -9,7 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 
-def run_atmux(args):
+def run_aip(args):
     """Run aip command and return parsed JSON output."""
     result = subprocess.run(
         ["python3", "-m", "aip"] + args,
@@ -81,7 +81,7 @@ def main():
     print("✓ Orchestrator created task-003")
 
     # List pending tasks
-    pending = run_atmux(["task", "list", "--stage", "pending"])
+    pending = run_aip(["task", "list", "--stage", "pending"])
     print(f"✓ Pending tasks: {[t['task_id'] for t in pending]}")
 
     # Phase 2: Coder claims and works on task
@@ -89,7 +89,7 @@ def main():
     print("-" * 60)
 
     # Coder claims task
-    result = run_atmux(["task", "claim", "task-003", "coder"])
+    result = run_aip(["task", "claim", "task-003", "coder"])
     print(f"✓ Coder claimed task-003 (lease until {result['lease_expires']})")
 
     # Coder reports status
@@ -132,7 +132,7 @@ Implemented JWT-based authentication with the following features:
     print("✓ Coder exported summary")
 
     # Coder marks task complete
-    run_atmux(["task", "complete", "task-003", "--agent-name", "coder"])
+    run_aip(["task", "complete", "task-003", "--agent-name", "coder"])
     send_mcp_tool_call("coder", "report_status", {
         "status": "finished",
         "message": "auth module complete"
@@ -169,7 +169,7 @@ Implemented JWT-based authentication with the following features:
     print("-" * 60)
 
     # Reviewer claims task
-    result = run_atmux(["task", "claim", "task-004", "reviewer"])
+    result = run_aip(["task", "claim", "task-004", "reviewer"])
     print(f"✓ Reviewer claimed task-004")
 
     # Reviewer reads coder's summary
@@ -216,7 +216,7 @@ Code review completed for JWT authentication implementation.
     print("✓ Reviewer exported review")
 
     # Reviewer completes task
-    run_atmux(["task", "complete", "task-004", "--agent-name", "reviewer"])
+    run_aip(["task", "complete", "task-004", "--agent-name", "reviewer"])
     send_mcp_tool_call("reviewer", "report_status", {
         "status": "finished",
         "message": "review complete - approved with suggestions"
@@ -228,7 +228,7 @@ Code review completed for JWT authentication implementation.
     print("-" * 60)
 
     # Check all tasks are done
-    done_tasks = run_atmux(["task", "list", "--stage", "done"])
+    done_tasks = run_aip(["task", "list", "--stage", "done"])
     print(f"✓ Completed tasks: {[t['task_id'] for t in done_tasks]}")
 
     # Check summaries exist

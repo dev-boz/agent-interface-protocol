@@ -1,4 +1,4 @@
-# agent-nexus — Agent Teams Mux
+# Agent Interface Protocol (AIP) — Agent Teams Mux
 
 ## The Core Insight
 
@@ -6,7 +6,7 @@ AI agents are Unix processes. They read input, they reason, they produce output.
 
 Instead of protocols (ACP, SSE), servers, message brokers, or frameworks — you need tmux, a shared filesystem, and one small MCP server.
 
-## How agent-nexus Is Different
+## How AIP Is Different
 
 Every existing tool in this space either adds unnecessary infrastructure or solves only part of the problem.
 
@@ -22,14 +22,14 @@ Every existing tool in this space either adds unnecessary infrastructure or solv
 | **claude-code-agent-farm** | 20+ parallel Claude Code agents | Single-vendor (Claude only), lock-based coordination |
 | **organisciak/atmux** | tmux session manager with browse/send | Session management only, no shared memory or MCP |
 
-**agent-nexus is the only design where agents read each other directly via tmux panes, coordinate through one shared MCP server, and need zero servers, zero brokers, zero frameworks.**
+**AIP is the only design where agents read each other directly via tmux panes, coordinate through one shared MCP server, and need zero servers, zero brokers, zero frameworks.**
 
 The key differences:
 
-- **No server**: CAO and CSP both require a running server process to broker messages. agent-nexus has none. The tmux server IS the infrastructure.
-- **Agents are aware of each other**: dmux, NTM, and workmux run agents in parallel but agents don't know about each other. In agent-nexus, any agent can read any other agent's pane.
-- **Vendor neutral**: claude-code-agent-farm is Claude-only. agent-nexus works with 11 supported backends across three tiers — claude-code, copilot, gemini, kiro, codex, opencode, cursor, qwen, kilo (Tier 1 native hooks), and amp, vibe/Mistral (Tier 2 aip-shim).
-- **Minimal footprint**: Overstory has 36 CLI commands and a SQLite mail system. agent-nexus stays small: selective MCP tools, CLI hooks where available, and tmux commands.
+- **No server**: CAO and CSP both require a running server process to broker messages. AIP has none. The tmux server IS the infrastructure.
+- **Agents are aware of each other**: dmux, NTM, and workmux run agents in parallel but agents don't know about each other. In AIP, any agent can read any other agent's pane.
+- **Vendor neutral**: claude-code-agent-farm is Claude-only. AIP works with 11 supported backends across three tiers — claude-code, copilot, gemini, kiro, codex, opencode, cursor, qwen, kilo (Tier 1 native hooks), and amp, vibe/Mistral (Tier 2 aip-shim).
+- **Minimal footprint**: Overstory has 36 CLI commands and a SQLite mail system. AIP stays small: selective MCP tools, CLI hooks where available, and tmux commands.
 - **The orchestrator is just another agent**: not a special process, not a server, not a framework. Any CLI agent can orchestrate. Swap orchestrators mid-session.
 
 ## Architecture
@@ -159,13 +159,13 @@ The orchestrator reads the last N lines of this file and knows exactly what's ha
 
 ACP is a spec that everyone implements differently. You end up writing adapters per vendor — the exact same normalisation problem as parsing different CLI outputs, just moved from terminal formatting to protocol implementation.
 
-agent-nexus sidesteps this entirely. You write the MCP server once, layer hooks on top where the CLI supports them, and expose only the tools the role actually needs. The agents don't need to know they're participating in a multi-agent system. They just see a small coordination surface and workspace files.
+AIP sidesteps this entirely. You write the MCP server once, layer hooks on top where the CLI supports them, and expose only the tools the role actually needs. The agents don't need to know they're participating in a multi-agent system. They just see a small coordination surface and workspace files.
 
 If ACP ever stabilises, your MCP tools can emit ACP-compatible events as a translation layer. But you're not blocked waiting.
 
 ### Why Not SSE?
 
-SSE exists to stream events from a server to a client over HTTP. In agent-nexus, live output is the tmux pane buffer — already streaming, already there. SSE is a transport layer you've made redundant.
+SSE exists to stream events from a server to a client over HTTP. In AIP, live output is the tmux pane buffer — already streaming, already there. SSE is a transport layer you've made redundant.
 
 SSE is also what makes ACP implementations inconsistent — everyone handles connection lifecycle, reconnection, and event formatting differently. tmux handles all of it natively.
 
@@ -223,7 +223,7 @@ The orchestrator is an LLM reading panes. It doesn't need error codes or retry l
 
 ## IDE Agents
 
-IDE agents (Cursor, Windsurf, Cline, Copilot) become full team members by running their terminal work inside the agent-nexus tmux session. One instruction: "use `tmux attach -t aip:frontend` for your terminal."
+IDE agents (Cursor, Windsurf, Cline, Copilot) become full team members by running their terminal work inside the AIP tmux session. One instruction: "use `tmux attach -t aip:frontend` for your terminal."
 
 Now the IDE agent shows up in `tmux list-windows`, the orchestrator reads its pane like any other agent, and it calls the same MCP tools. From the orchestrator's perspective, it's just another agent — it doesn't know or care that there's a GUI attached.
 
@@ -455,7 +455,7 @@ No adapter code. No parser. No protocol integration. The MCP server gives it the
 
 ## What This Replaces
 
-| Traditional approach | agent-nexus equivalent |
+| Traditional approach | AIP equivalent |
 |---|---|
 | ACP protocol | Selective MCP tools + hooks |
 | SSE streaming | tmux pane buffer |
@@ -526,9 +526,9 @@ The MCP server is the token-efficient layer. That's what it was designed for.
 
 ## ACP/A2A Compatibility
 
-agent-nexus doesn't depend on ACP or A2A, but the MCP tools map cleanly to both:
+AIP doesn't depend on ACP or A2A, but the MCP tools map cleanly to both:
 
-| agent-nexus MCP tool | ACP equivalent | A2A equivalent |
+| AIP MCP tool | ACP equivalent | A2A equivalent |
 |---|---|---|
 | `report_status` | Task status events | Task status updates |
 | `register_capabilities` | Agent description | Agent Card |

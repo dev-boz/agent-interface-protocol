@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-def run_atmux(args):
+def run_aip(args):
     """Run aip command and return parsed JSON output."""
     result = subprocess.run(
         ["python3", "-m", "aip"] + args,
@@ -67,7 +67,7 @@ def send_mcp_tool_call(agent_name, tool_name, arguments):
 
 def claim_task(agent_name, task_id, results):
     """Try to claim a task and store result."""
-    result, error = run_atmux(["task", "claim", task_id, agent_name])
+    result, error = run_aip(["task", "claim", task_id, agent_name])
     results[agent_name] = {
         "success": result is not None,
         "result": result,
@@ -88,7 +88,7 @@ def main():
         "priority": "high"
     })
 
-    pending = run_atmux(["task", "list", "--stage", "pending"])[0]
+    pending = run_aip(["task", "list", "--stage", "pending"])[0]
     task_id = pending[-1]['task_id']  # Get the latest task
     print(f"✓ Created {task_id}")
 
@@ -149,7 +149,7 @@ def main():
     print("\n📊 Phase 4: Verify task state")
     print("-" * 60)
 
-    claimed = run_atmux(["task", "list", "--stage", "claimed"])[0]
+    claimed = run_aip(["task", "list", "--stage", "claimed"])[0]
     claimed_ids = [t['task_id'] for t in claimed]
 
     if task_id in claimed_ids:
@@ -175,7 +175,7 @@ def main():
     print("✓ Created 3 tasks")
 
     # Get task IDs
-    pending = run_atmux(["task", "list", "--stage", "pending"])[0]
+    pending = run_aip(["task", "list", "--stage", "pending"])[0]
     task_ids = [t['task_id'] for t in pending[-3:]]
     print(f"  Task IDs: {task_ids}")
 
@@ -186,7 +186,7 @@ def main():
     print("\n3 agents each try to claim all 3 tasks...")
     for agent in agents:
         for task_id in task_ids:
-            result, error = run_atmux(["task", "claim", task_id, agent])
+            result, error = run_aip(["task", "claim", task_id, agent])
             if result:
                 claim_results[agent].append(task_id)
                 print(f"  ✓ {agent} claimed {task_id}")

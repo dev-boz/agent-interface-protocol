@@ -1,4 +1,4 @@
-# agent-nexus Testing Summary
+# Agent Interface Protocol (AIP) Testing Summary
 
 **Date**: 2026-03-30
 **Status**: ✅ Current suite passing; hooks, selective MCP profiles, aip-shim, and all 11 backends verified
@@ -189,9 +189,9 @@ Simulated orchestrator crash mid-workflow:
 | Coordination protocol | Selective MCP tools + hooks | ✅ |
 | Fault tolerance | Workspace + event log | ✅ |
 
-## What agent-nexus Replaces
+## What AIP Replaces
 
-| Traditional | agent-nexus | Status |
+| Traditional | AIP | Status |
 |-------------|-------|--------|
 | ACP protocol | Selective MCP tools + hooks | ✅ Verified |
 | SSE streaming | tmux pane buffer | ✅ Verified |
@@ -260,14 +260,14 @@ Real-world usage still requires:
 
 ### Documentation
 ✅ **Complete:**
-- Architecture doc (`agent-nexus.md`)
+- Architecture doc (`AIP.md`)
 - CLI reference (`README.md`)
 - MCP server reference (`README.md`)
 - Test suite (5 integration tests + comprehensive unit/backend tests)
 
 ## Conclusion
 
-agent-nexus successfully demonstrates that multi-agent orchestration can be built on Unix primitives (tmux + filesystem) with zero infrastructure. The core insight holds: **AI agents are Unix processes, and Unix already solved process orchestration.**
+AIP successfully demonstrates that multi-agent orchestration can be built on Unix primitives (tmux + filesystem) with zero infrastructure. The core insight holds: **AI agents are Unix processes, and Unix already solved process orchestration.**
 
 **Key achievements:**
 - ✅ Zero servers, zero brokers, zero frameworks

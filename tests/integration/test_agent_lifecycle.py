@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-def run_atmux(args):
+def run_aip(args):
     """Run aip command and return parsed JSON output."""
     result = subprocess.run(
         ["python3", "-m", "aip"] + args,
@@ -27,10 +27,10 @@ def main():
     print("\n📦 Phase 1: Spawn agent")
     print("-" * 60)
 
-    result = run_atmux(["agent", "spawn", "lifecycle-test", "bash"])
+    result = run_aip(["agent", "spawn", "lifecycle-test", "bash"])
     print(f"✓ Spawned agent: {result['spawned']}")
 
-    agents = run_atmux(["agent", "list"])
+    agents = run_aip(["agent", "list"])
     agent_names = [a['name'] for a in agents]
     assert "lifecycle-test" in agent_names
     print(f"✓ Agent appears in list: {agent_names}")
@@ -39,7 +39,7 @@ def main():
     print("\n💬 Phase 2: Send commands and capture output")
     print("-" * 60)
 
-    run_atmux(["agent", "send", "lifecycle-test", "echo 'Agent is alive'"])
+    run_aip(["agent", "send", "lifecycle-test", "echo 'Agent is alive'"])
     time.sleep(0.5)
 
     result = subprocess.run(
@@ -58,7 +58,7 @@ def main():
     print("-" * 60)
 
     # Simulate agent exporting its session state
-    run_atmux(["agent", "send", "lifecycle-test", "echo 'SESSION_ID=test-session-123' > /tmp/agent-state.txt"])
+    run_aip(["agent", "send", "lifecycle-test", "echo 'SESSION_ID=test-session-123' > /tmp/agent-state.txt"])
     time.sleep(0.5)
     print("✓ Agent saved session state to /tmp/agent-state.txt")
 
@@ -66,10 +66,10 @@ def main():
     print("\n💀 Phase 4: Kill agent")
     print("-" * 60)
 
-    run_atmux(["agent", "kill", "lifecycle-test"])
+    run_aip(["agent", "kill", "lifecycle-test"])
     print("✓ Agent killed")
 
-    agents = run_atmux(["agent", "list"])
+    agents = run_aip(["agent", "list"])
     agent_names = [a['name'] for a in agents]
     assert "lifecycle-test" not in agent_names
     print(f"✓ Agent removed from list: {agent_names}")
@@ -82,11 +82,11 @@ def main():
     # aip agent spawn lifecycle-test "gemini --resume session-abc123"
     # For this test, we just respawn with bash and verify the pattern works
 
-    result = run_atmux(["agent", "spawn", "lifecycle-test-resumed", "bash"])
+    result = run_aip(["agent", "spawn", "lifecycle-test-resumed", "bash"])
     print(f"✓ Respawned agent: {result['spawned']}")
 
     # Verify it can access the saved state
-    run_atmux(["agent", "send", "lifecycle-test-resumed", "cat /tmp/agent-state.txt"])
+    run_aip(["agent", "send", "lifecycle-test-resumed", "cat /tmp/agent-state.txt"])
     time.sleep(0.5)
 
     result = subprocess.run(
@@ -119,7 +119,7 @@ def main():
     # Cleanup
     print("\n🧹 Cleanup")
     print("-" * 60)
-    run_atmux(["agent", "kill", "lifecycle-test-resumed"])
+    run_aip(["agent", "kill", "lifecycle-test-resumed"])
     print("✓ Cleaned up test agents")
 
     print("\n" + "=" * 60)

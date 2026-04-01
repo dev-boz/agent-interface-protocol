@@ -1,11 +1,11 @@
 #!/bin/bash
-# agent-nexus Quick Start Guide
-# Get up and running with agent-nexus in 5 minutes
+# AIP Quick Start Guide
+# Get up and running with AIP in 5 minutes
 
 set -e
 
 echo "============================================================"
-echo "agent-nexus Quick Start"
+echo "AIP Quick Start"
 echo "============================================================"
 echo ""
 
@@ -24,11 +24,11 @@ fi
 echo "✓ python3 found"
 echo ""
 
-# Install agent-nexus
-echo "Installing agent-nexus..."
+# Install AIP
+echo "Installing AIP..."
 cd "$(dirname "$0")/.."
 pip install -e . > /dev/null 2>&1
-echo "✓ agent-nexus installed"
+echo "✓ AIP installed"
 echo ""
 
 # Verify installation
@@ -50,7 +50,7 @@ echo ""
 echo "Initializing workspace..."
 aip init --ensure-session > /dev/null
 echo "✓ Workspace created at: workspace/"
-echo "✓ tmux session 'anex' created"
+echo "✓ tmux session 'aip' created"
 echo ""
 
 # Show what was created
@@ -100,7 +100,7 @@ echo "3. Read its output:"
 echo "   $ aip agent capture coder --lines 5"
 echo ""
 echo "4. Watch agents in real-time:"
-echo "   $ tmux attach -t anex"
+echo "   $ tmux attach -t aip"
 echo "   (Press Ctrl-b d to detach)"
 echo ""
 echo "5. Check the event log:"
@@ -112,14 +112,14 @@ echo "============================================================"
 echo "MCP Integration"
 echo "============================================================"
 echo ""
-echo "To use agent-nexus with CLI agents that support MCP:"
+echo "To use AIP with CLI agents that support MCP:"
 echo ""
 echo "1. Add to your agent's MCP config (e.g., ~/.gemini/settings.json):"
 echo ""
 cat << 'EOF'
 {
   "mcpServers": {
-    "anex": {
+    "aip": {
       "command": "aip-mcp",
       "args": ["--workspace", "/path/to/workspace", "--agent-name", "coder"]
     }
@@ -127,7 +127,7 @@ cat << 'EOF'
 }
 EOF
 echo ""
-echo "2. The agent now has 5 agent-nexus tools:"
+echo "2. The agent now has 5 AIP tools:"
 echo "   - report_status       # Update status"
 echo "   - export_summary      # Save output for other agents"
 echo "   - register_capabilities  # Declare skills"
@@ -140,7 +140,7 @@ echo "============================================================"
 echo "Next Steps"
 echo "============================================================"
 echo ""
-echo "✓ agent-nexus is ready to use!"
+echo "✓ AIP is ready to use!"
 echo ""
 echo "Try the demo:"
 echo "  $ ./demo.sh"
@@ -150,7 +150,7 @@ echo "  $ ./run_tests.sh"
 echo ""
 echo "Read the docs:"
 echo "  - README.md           # Full documentation"
-echo "  - anex.md            # Architecture deep-dive"
+echo "  - agent-nexus.md            # Architecture deep-dive"
 echo "  - TESTING_SUMMARY.md  # Test results"
 echo ""
 echo "For real-world usage:"

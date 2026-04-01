@@ -1,11 +1,11 @@
 #!/bin/bash
-# agent-nexus Test Runner
+# AIP Test Runner
 # Runs all unit and integration tests
 
 set -e
 
 echo "============================================================"
-echo "agent-nexus Test Suite"
+echo "AIP Test Suite"
 echo "============================================================"
 echo ""
 
@@ -27,14 +27,14 @@ run_test() {
     echo -n "Running $test_name... "
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
 
-    if eval "$test_command" > /tmp/atmux_test_$$.log 2>&1; then
+    if eval "$test_command" > /tmp/aip_test_$$.log 2>&1; then
         echo -e "${GREEN}✓ PASSED${NC}"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     else
         echo -e "${RED}✗ FAILED${NC}"
         FAILED_TESTS=$((FAILED_TESTS + 1))
-        echo "  Log: /tmp/atmux_test_$$.log"
-        tail -n 20 /tmp/atmux_test_$$.log | sed 's/^/    /'
+        echo "  Log: /tmp/aip_test_$$.log"
+        tail -n 20 /tmp/aip_test_$$.log | sed 's/^/    /'
     fi
 }
 
@@ -66,17 +66,17 @@ echo ""
 echo "Phase 3: CLI Commands"
 echo "------------------------------------------------------------"
 
-run_test "aip init" "python -m aip --workspace-root /tmp/anex-test-cli init"
-run_test "aip session ensure" "python -m aip --workspace-root /tmp/anex-test-cli --session-name anex-test-cli session ensure"
-run_test "aip agent spawn" "python -m aip --session-name anex-test-cli agent spawn test-cli-agent 'bash'"
-run_test "aip agent list" "python -m aip --session-name anex-test-cli agent list"
-run_test "aip agent send" "python -m aip --session-name anex-test-cli agent send test-cli-agent 'echo test'"
-run_test "aip agent capture" "python -m aip --session-name anex-test-cli agent capture test-cli-agent --lines 5"
-run_test "aip agent kill" "python -m aip --session-name anex-test-cli agent kill test-cli-agent"
+run_test "aip init" "python -m aip --workspace-root /tmp/aip-test-cli init"
+run_test "aip session ensure" "python -m aip --workspace-root /tmp/aip-test-cli --session-name aip-test-cli session ensure"
+run_test "aip agent spawn" "python -m aip --session-name aip-test-cli agent spawn test-cli-agent 'bash'"
+run_test "aip agent list" "python -m aip --session-name aip-test-cli agent list"
+run_test "aip agent send" "python -m aip --session-name aip-test-cli agent send test-cli-agent 'echo test'"
+run_test "aip agent capture" "python -m aip --session-name aip-test-cli agent capture test-cli-agent --lines 5"
+run_test "aip agent kill" "python -m aip --session-name aip-test-cli agent kill test-cli-agent"
 
 # Cleanup CLI test session
-tmux kill-session -t anex-test-cli 2>/dev/null || true
-rm -rf /tmp/anex-test-cli
+tmux kill-session -t aip-test-cli 2>/dev/null || true
+rm -rf /tmp/aip-test-cli
 
 echo ""
 echo "============================================================"
