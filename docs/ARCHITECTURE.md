@@ -536,7 +536,7 @@ AIP doesn't depend on ACP or A2A, but the MCP tools map cleanly to both:
 | `export_summary` | Task artifact | Task artifact |
 | `report_progress` | Progress events | Progress updates |
 
-If the ecosystem converges, add a flag: `ANEX_ACP_COMPAT=true`. The MCP tools then also emit ACP-formatted events alongside the file writes. Compatibility without coupling — build it later if needed.
+If the ecosystem converges, add a flag: `AIP_ACP_COMPAT=true`. The MCP tools then also emit ACP-formatted events alongside the file writes. Compatibility without coupling — build it later if needed.
 
 ## Implementation Notes
 
