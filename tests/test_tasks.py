@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -23,7 +23,7 @@ def test_task_queue_lifecycle_moves_files_between_stages(tmp_path):
         task.task_id,
         "coder",
         lease_seconds=120,
-        now=datetime(2026, 3, 17, 12, 0, tzinfo=UTC),
+        now=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
     )
     assert claimed.claimed_by == "coder"
     assert (workspace.claimed_dir / "coder-task-001.md").exists()
@@ -55,9 +55,9 @@ def test_reclaim_expired_returns_task_to_pending(tmp_path):
         task.task_id,
         "reviewer",
         lease_seconds=30,
-        now=datetime(2026, 3, 17, 12, 0, tzinfo=UTC),
+        now=datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc),
     )
-    reclaimed = queue.reclaim_expired(now=datetime(2026, 3, 17, 12, 1, tzinfo=UTC))
+    reclaimed = queue.reclaim_expired(now=datetime(2026, 3, 17, 12, 1, tzinfo=timezone.utc))
 
     assert reclaimed == [task.task_id]
     pending_text = (workspace.pending_dir / f"{task.task_id}.md").read_text(encoding="utf-8")

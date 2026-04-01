@@ -6,7 +6,7 @@ import os
 import re
 import threading
 from collections import deque
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +18,11 @@ logger = logging.getLogger("aip.workspace")
 
 
 def utc_now() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 def isoformat_z(value: datetime) -> str:
-    return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def parse_isoformat(value: str) -> datetime:
@@ -170,7 +170,7 @@ class AipWorkspace:
         timestamp: datetime | None = None,
     ) -> Path:
         self.ensure()
-        stamp = (timestamp or utc_now()).astimezone(UTC)
+        stamp = (timestamp or utc_now()).astimezone(timezone.utc)
         filename = f"{sanitize_component(agent_name)}-{stamp.strftime('%m%d-%H%M%S')}.md"
         summary_path = self.summaries_dir / filename
         final_content = content if content.endswith("\n") else f"{content}\n"
