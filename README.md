@@ -2,29 +2,24 @@
 
 [![CI](https://github.com/dev-boz/agent-interface-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-boz/agent-interface-protocol/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Zero-infra multi-agent orchestration. Every agent framework reinvents transport — tmux already solved it. LLMs are parsers, so protocol normalization is unnecessary. One shared MCP server, filesystem workspace, tmux panes. No servers, no brokers, no frameworks.
+> **Status: Work in Progress** — the core works and has 195 passing tests, but this is early-stage. Contributions, feedback, and new backend adapters are very welcome.
 
-## What AIP Replaces
+AIP explores a hypothesis: **multi-agent orchestration doesn't need new infrastructure.** tmux already solves process management, inter-process communication, and session persistence. The filesystem already solves state. LLMs can already parse each other's natural-language output, so protocol normalization between agents may be unnecessary.
 
-| Traditional Approach | AIP Equivalent |
+The bet is that you can replace message brokers, agent frameworks, and custom transport layers with things Unix gave us decades ago — and get something simpler, more debuggable, and vendor-neutral.
+
+## The Idea
+
+| Instead of... | AIP uses... |
 |---|---|
-| ACP protocol | 8 MCP tools |
-| SSE streaming | tmux pane buffer |
 | Message broker | tmux server (shared memory) |
-| Service discovery | `tmux list-windows` |
-| Session persistence | tmux sessions + native CLI resume |
 | Agent framework | bash + tmux commands |
-| Protocol normalisation | Agents read each other natively (LLMs ARE parsers) |
-| Database for state | Filesystem |
+| Custom protocol | Agents read each other natively (LLMs as parsers) |
+| Service discovery | `tmux list-windows` |
+| Database for state | Filesystem with atomic `mv` |
+| SSE streaming | tmux pane buffers |
 | HTTP transport (remote) | SSH |
-| Observability / audit trail | `workspace/events.jsonl` |
-| Distributed job queue | `workspace/tasks/` with atomic `mv` |
-| Circuit breaker / retry | Orchestrator reads errors in English |
-| Remote cloud agents | git push/pull + watcher pane |
-| Agent communication model | Interest maps (targeted subscriptions) |
-| Blocking/callback mechanism | `wait_for` tool (process-level wait, zero token burn) |
-| Sub-agent / sub-task spawning | `spawn_teammate` with depth/breadth limits |
-| Agent-to-agent messaging | `notify` tool with mid-stream injection |
+| Observability | `workspace/events.jsonl` (append-only log) |
 
 ## Architecture
 
@@ -71,6 +66,8 @@ Always check in this order — never jump to pane reads when structured data exi
 ## Quick Start
 
 ```bash
+pip install -e .
+
 # Initialize workspace and tmux session
 aip init --ensure-session
 
@@ -87,45 +84,70 @@ aip agent send coder "implement the auth module"
 aip agent list
 ```
 
-## Backend Compatibility
+See [`examples/two-agent-review.sh`](examples/two-agent-review.sh) for a full two-agent scenario you can run in under a minute (no API keys needed).
 
-| Backend | CLI Name | Launch Command | Tier | Hook Config | Recommended Setup |
-|---|---|---|---|---|---|
-| **Claude Code** | claude-code | `claude` | Tier 1 (native) | `.claude/settings.json` | Both: hooks for telemetry, MCP for coordination |
-| **Copilot** | copilot | `copilot` | Tier 1 (native) | `.github/copilot/hooks.json` | Both |
-| **Gemini** | gemini | `gemini` | Tier 1 (native) | `.gemini/settings.json` | Both. `aip hook install --cli gemini ...` |
-| **Kiro** | kiro | `kiro-cli` | Tier 1 (native) | `.kiro/agents/{name}.json` | Both. `aip hook install --cli kiro ...` |
-| **Codex** | codex | `codex` | Tier 1 (native) | `.codex/hooks.json` + `config.toml` | Both. `aip hook install --cli codex ...` |
-| **OpenCode** | opencode | `opencode` | Tier 1 (native) | Plugin events | Both, but hook wiring is currently manual |
-| **Cursor** | cursor | `agent` | Tier 1 (native) | `.cursor/settings.json` | Both. `aip hook install --cli cursor ...` |
-| **Qwen** | qwen | `qwen` | Tier 1 (native) | `.qwen/settings.json` | Both. `aip hook install --cli qwen ...` |
-| **Kilo** | kilo | `kilo` | Tier 1 (native) | Plugin events (opencode fork) | Same as opencode — uses plugin event system |
-| **Vibe (Mistral)** | vibe | `vibe` | Tier 2 (shim) | `aip-shim` intercept | MCP + `aip shim watch` for lifecycle telemetry |
-| **Amp** | amp | `amp` | Tier 2 (shim) | `aip-shim` intercept | MCP + `aip shim watch` for lifecycle telemetry |
+## Supported Backends
+
+AIP currently has adapters for 11 CLI agents across two integration tiers:
+
+| Backend | Tier | Hook Config | Notes |
+|---|---|---|---|
+| Claude Code | Tier 1 (native) | `.claude/settings.json` | Hooks + MCP |
+| Copilot | Tier 1 (native) | `.github/copilot/hooks.json` | Hooks + MCP |
+| Gemini | Tier 1 (native) | `.gemini/settings.json` | Hooks + MCP |
+| Kiro | Tier 1 (native) | `.kiro/agents/{name}.json` | Hooks + MCP |
+| Codex | Tier 1 (native) | `.codex/hooks.json` | Hooks + MCP |
+| OpenCode | Tier 1 (native) | Plugin events | MCP, manual hook wiring |
+| Cursor | Tier 1 (native) | `.cursor/settings.json` | Hooks + MCP |
+| Qwen | Tier 1 (native) | `.qwen/settings.json` | Hooks + MCP |
+| Kilo | Tier 1 (native) | Plugin events | OpenCode fork |
+| Vibe (Mistral) | Tier 2 (shim) | `aip-shim` intercept | MCP + shim watcher |
+| Amp | Tier 2 (shim) | `aip-shim` intercept | MCP + shim watcher |
+
+Adding a new backend is one of the easiest ways to contribute — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## What's Next
+
+AIP is usable today for local multi-agent workflows, but there's plenty of room to grow:
+
+- [ ] **PyPI publish** — installable via `pip install agent-interface-protocol`
+- [ ] **More end-to-end examples** — real-world scenarios beyond the demo script
+- [ ] **`aip dashboard`** — live multiplexed view of all agents working in real time
+- [ ] **Additional Tier 2 shims** — Windsurf, Cline, Aider, and other CLIs without native hooks
+- [ ] **ACP/A2A compatibility layer** — optional flag to emit ACP-formatted events alongside file writes
+- [ ] **Incremental pane reads** — cursor-based reads to avoid re-reading old output (massive token savings)
+- [ ] **Remote multi-machine orchestration** — SSH-based workspace sync across hosts
+- [ ] **IDE extension (VSIX)** — integrate AIP transparently into VS Code, Cursor, Windsurf
+
+If any of these interest you, [open a discussion](https://github.com/dev-boz/agent-interface-protocol/discussions) or grab a [good first issue](https://github.com/dev-boz/agent-interface-protocol/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 
 ## Installation
 
-AIP is a small Python package with one runtime Python dependency: the `mcp` SDK used by `aip-mcp`.
+One runtime dependency: the `mcp` SDK. Everything else is Python stdlib.
 
 ```bash
-cd /path/to/agent-interface-protocol
+git clone https://github.com/dev-boz/agent-interface-protocol.git
+cd agent-interface-protocol
 pip install -e .          # installs `aip` and `aip-mcp` commands
 pip install -e '.[dev]'   # also installs pytest for development
 ```
 
-**Requirements**: Python 3.10+, tmux (any version).
+**Requirements**: Python 3.10+, tmux.
 
 ## Development
 
 ```bash
-PYTHONPATH=. python -m pytest -q tests/
+python -m pytest tests/ -q
 ```
 
-**Current**: 195 tests, all passing.
+195 tests covering workspace primitives, task queue, hook normalization, MCP tools, CLI commands, and multi-backend collaboration. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-## Links
+## Documentation
 
-📖 [Full CLI & MCP Reference](docs/REFERENCE.md) · [Architecture Deep Dive](docs/ARCHITECTURE.md) · [Quick Reference Card](docs/QUICKREF.md) · [Spec](agent-interface-protocol.md)
+- 📖 [Full CLI & MCP Reference](docs/REFERENCE.md)
+- 🏗️ [Architecture Deep Dive](docs/ARCHITECTURE.md)
+- ⚡ [Quick Reference Card](docs/QUICKREF.md)
+- 📋 [Design Spec](agent-interface-protocol.md)
 
 ## License
 
