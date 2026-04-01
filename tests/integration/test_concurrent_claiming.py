@@ -11,9 +11,9 @@ import time
 from pathlib import Path
 
 def run_atmux(args):
-    """Run atmux command and return parsed JSON output."""
+    """Run aip command and return parsed JSON output."""
     result = subprocess.run(
-        ["python3", "-m", "atmux"] + args,
+        ["python3", "-m", "aip"] + args,
         capture_output=True,
         text=True
     )
@@ -25,7 +25,7 @@ def run_atmux(args):
 def send_mcp_tool_call(agent_name, tool_name, arguments):
     """Send a tool call to an agent's MCP server."""
     proc = subprocess.Popen(
-        ["atmux-mcp", "--workspace", "workspace", "--agent-name", agent_name],
+        ["aip-mcp", "--workspace", "workspace", "--agent-name", agent_name],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -76,7 +76,7 @@ def claim_task(agent_name, task_id, results):
 
 def main():
     print("=" * 60)
-    print("ATMUX Test: Concurrent Task Claiming (Race Conditions)")
+    print("agent-interface-protocol Test: Concurrent Task Claiming (Race Conditions)")
     print("=" * 60)
 
     # Phase 1: Create a single task

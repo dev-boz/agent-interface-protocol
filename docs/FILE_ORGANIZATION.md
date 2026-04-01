@@ -1,25 +1,31 @@
-# ATMUX File Organization
+# agent-nexus File Organization
 
 ## Directory Structure
 
 ```
-atmux/
+agent-nexus/
 ├── README.md                    # Main documentation (start here)
 ├── pyproject.toml              # Package configuration
 │
-├── atmux/                      # Core implementation
+├── aip/                      # Core implementation
 │   ├── __init__.py
 │   ├── __main__.py             # CLI entry point
+│   ├── aip_shim.py             # Tier 2 interactive intercept shim
 │   ├── cli.py                  # Operator CLI (170 lines)
+│   ├── hook_configs.py         # Per-backend hook config generation
+│   ├── hooks.py                # Hook runtime (normalization, stdin, writes)
 │   ├── mcp_server.py           # JSON-RPC 2.0 MCP server (370 lines)
 │   ├── tasks.py                # Task queue with atomic claiming (245 lines)
 │   ├── tmux.py                 # tmux controller (120 lines)
 │   └── workspace.py            # Filesystem primitives (165 lines)
 │
 ├── tests/                      # Test suite
+│   ├── test_aip_shim.py        # aip-shim intercept tests
+│   ├── test_all_backends.py    # All 11 backends (66 tests)
 │   ├── test_cli.py             # CLI tests (1 test)
+│   ├── test_hooks.py           # Hook runtime and config generation
 │   ├── test_mcp.py             # MCP server tests (9 tests)
-│   ├── test_tasks.py           # Task queue tests (4 tests)
+│   ├── test_tasks.py           # Task queue tests (including blocked_by)
 │   ├── test_tmux.py            # tmux controller tests (4 tests)
 │   ├── test_workspace.py       # Workspace tests (3 tests)
 │   └── integration/            # Integration tests
@@ -28,6 +34,7 @@ atmux/
 │       ├── test_full_cycle.py
 │       ├── test_lease_expiry.py
 │       ├── test_mcp_live.py
+│       ├── test_multi_backend_collab.py  # Multi-backend collaboration (8 tests)
 │       └── test_orchestrator_recovery.py
 │
 ├── scripts/                    # Utility scripts
@@ -57,20 +64,23 @@ atmux/
 
 | Category | Count | Lines |
 |----------|-------|-------|
-| Core implementation | 7 files | ~1,070 lines |
-| Unit tests | 5 files | 21 tests |
-| Integration tests | 6 files | 6 tests |
+| Core implementation | 10 files | ~1,070 lines |
+| Unit tests | 8 files | 194 tests |
+| Integration tests | 7 files | (included above) |
 | Scripts | 3 files | ~150 lines |
 | Documentation | 5 files | ~2,600 lines |
 
 ## Organization Principles
 
-### Core Implementation (`atmux/`)
+### Core Implementation (`aip/`)
 Pure stdlib Python, zero external dependencies. Each module has a single responsibility:
 - `workspace.py` — Filesystem operations (status, events, summaries)
-- `tasks.py` — Task queue with atomic claiming
+- `tasks.py` — Task queue with atomic claiming and blocked_by dependencies
 - `tmux.py` — tmux command generation and execution
 - `mcp_server.py` — JSON-RPC 2.0 MCP server (5 tools)
+- `hooks.py` — Hook runtime (normalization, stdin parsing, workspace writes)
+- `hook_configs.py` — Per-backend hook config generation (all 11 backends)
+- `aip_shim.py` — Tier 2 interactive intercept shim (vibe, amp)
 - `cli.py` — Operator CLI (init, session, agent, task commands)
 
 ### Tests (`tests/`)
@@ -91,7 +101,7 @@ Executable shell scripts for common operations:
 - `FILE_ORGANIZATION.md` — This file
 
 ### Workspace (`workspace/`)
-Runtime directory created by `atmux init`. Not checked into version control.
+Runtime directory created by `aip init`. Not checked into version control.
 
 ## Running Tests
 
@@ -147,8 +157,8 @@ cat docs/FILE_ORGANIZATION.md
 ## Installation
 
 ```bash
-cd tools/atmux
-pip install -e .          # installs atmux and atmux-mcp commands
+cd /path/to/agent-nexus
+pip install -e .          # installs aip and aip-mcp commands
 pip install -e '.[dev]'   # also installs pytest for development
 ```
 
@@ -159,8 +169,8 @@ pip install -e '.[dev]'   # also installs pytest for development
 | `README.md` | Main documentation | Start here |
 | `docs/ARCHITECTURE.md` | Architecture deep-dive | Understanding design philosophy |
 | `docs/QUICKREF.md` | Quick reference | Daily usage |
-| `atmux/mcp_server.py` | MCP server implementation | Understanding tools |
-| `atmux/tasks.py` | Task queue logic | Understanding claiming |
+| `aip/mcp_server.py` | MCP server implementation | Understanding tools |
+| `aip/tasks.py` | Task queue logic | Understanding claiming |
 | `tests/integration/test_full_cycle.py` | Full workflow example | Understanding orchestration |
 | `scripts/run_tests.sh` | Test runner | Running tests |
 
@@ -168,7 +178,7 @@ pip install -e '.[dev]'   # also installs pytest for development
 
 **Before**:
 ```
-atmux/
+agent-nexus/
 ├── test_*.py (6 files at root)
 ├── *.sh (3 files at root)
 ├── *.md (4 files at root)
@@ -177,7 +187,7 @@ atmux/
 
 **After**:
 ```
-atmux/
+agent-nexus/
 ├── tests/
 │   ├── (unit tests)
 │   └── integration/ (integration tests)

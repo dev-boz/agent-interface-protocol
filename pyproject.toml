@@ -3,11 +3,31 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "atmux"
-version = "0.1.0"
-description = "Filesystem and tmux primitives for ATMUX agent orchestration"
+name = "agent-interface-protocol"
+version = "0.3.0"
+description = "Filesystem and tmux primitives for multi-agent orchestration across 11 CLI backends"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = ["mcp>=1.0.0"]
+keywords = ["agents", "ai", "orchestration", "tmux", "mcp", "multi-agent", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Systems Administration",
+]
+
+[project.urls]
+Homepage = "https://github.com/dev-boz/agent-interface-protocol"
+Repository = "https://github.com/dev-boz/agent-interface-protocol"
+Issues = "https://github.com/dev-boz/agent-interface-protocol/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -15,11 +35,11 @@ dev = [
 ]
 
 [project.scripts]
-atmux = "atmux.cli:main"
-atmux-mcp = "atmux.mcp_server:main"
+aip = "aip.cli:main"
+aip-mcp = "aip.mcp_server:main"
 
 [tool.setuptools.packages.find]
-include = ["atmux*"]
+include = ["aip*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

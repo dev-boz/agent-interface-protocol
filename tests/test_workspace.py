@@ -1,11 +1,11 @@
 import json
 import threading
 
-from atmux.workspace import AtmuxWorkspace, atomic_write_text
+from aip.workspace import AipWorkspace, atomic_write_text
 
 
 def test_workspace_creates_layout_and_status_files(tmp_path):
-    workspace = AtmuxWorkspace(tmp_path / "workspace")
+    workspace = AipWorkspace(tmp_path / "workspace")
     workspace.ensure()
 
     assert workspace.events_path.exists()
@@ -26,7 +26,7 @@ def test_workspace_creates_layout_and_status_files(tmp_path):
 
 
 def test_workspace_events_and_summary_exports(tmp_path):
-    workspace = AtmuxWorkspace(tmp_path / "workspace")
+    workspace = AipWorkspace(tmp_path / "workspace")
     summary_path = workspace.export_summary("reviewer", "## done")
     event = workspace.append_event("reviewer", "status", status="finished")
 
@@ -39,7 +39,7 @@ def test_workspace_events_and_summary_exports(tmp_path):
 
 
 def test_next_task_id_scans_all_task_directories(tmp_path):
-    workspace = AtmuxWorkspace(tmp_path / "workspace")
+    workspace = AipWorkspace(tmp_path / "workspace")
     workspace.ensure()
     for relative in ("pending/task-001.md", "done/task-009.md", "claimed/coder-task-010.md"):
         path = workspace.tasks_dir / relative
@@ -50,20 +50,20 @@ def test_next_task_id_scans_all_task_directories(tmp_path):
 
 
 def test_agent_tree_helpers_register_root_and_child(tmp_path):
-    workspace = AtmuxWorkspace(tmp_path / "workspace")
+    workspace = AipWorkspace(tmp_path / "workspace")
 
     root = workspace.ensure_agent_node(
         "orchestrator",
         depth=0,
         parent=None,
-        tmux_window="atmux:orchestrator",
+        tmux_window="aip:orchestrator",
         cli_type="claude-code",
     )
     child = workspace.add_agent_child(
         "orchestrator",
         "coder",
         depth=1,
-        tmux_window="atmux:coder",
+        tmux_window="aip:coder",
         cli_type="gemini",
     )
 
@@ -75,10 +75,10 @@ def test_agent_tree_helpers_register_root_and_child(tmp_path):
 
 
 def test_agent_tree_postorder_and_removal(tmp_path):
-    workspace = AtmuxWorkspace(tmp_path / "workspace")
-    workspace.ensure_agent_node("orchestrator", depth=0, parent=None, tmux_window="atmux:orchestrator")
-    workspace.add_agent_child("orchestrator", "manager", depth=1, tmux_window="atmux:manager")
-    workspace.add_agent_child("manager", "worker", depth=2, tmux_window="atmux:worker")
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure_agent_node("orchestrator", depth=0, parent=None, tmux_window="aip:orchestrator")
+    workspace.add_agent_child("orchestrator", "manager", depth=1, tmux_window="aip:manager")
+    workspace.add_agent_child("manager", "worker", depth=2, tmux_window="aip:worker")
 
     assert workspace.agent_subtree_postorder("orchestrator") == ["worker", "manager", "orchestrator"]
 
@@ -89,7 +89,7 @@ def test_agent_tree_postorder_and_removal(tmp_path):
 
 
 def test_read_json_returns_empty_on_corrupt_file(tmp_path):
-    workspace = AtmuxWorkspace(tmp_path / "workspace")
+    workspace = AipWorkspace(tmp_path / "workspace")
     workspace.ensure()
     corrupt = workspace.root / "corrupt.json"
     corrupt.write_text("{invalid json", encoding="utf-8")
@@ -97,7 +97,7 @@ def test_read_json_returns_empty_on_corrupt_file(tmp_path):
 
 
 def test_tail_events_skips_corrupt_lines(tmp_path):
-    workspace = AtmuxWorkspace(tmp_path / "workspace")
+    workspace = AipWorkspace(tmp_path / "workspace")
     workspace.ensure()
     workspace.append_event("coder", "status", status="working")
     with workspace.events_path.open("a", encoding="utf-8") as handle:

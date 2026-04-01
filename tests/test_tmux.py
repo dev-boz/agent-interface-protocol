@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from atmux.tmux import TmuxController
+from aip.tmux import TmuxController
 
 
 class FakeRunner:
@@ -23,7 +23,7 @@ def test_ensure_session_creates_session_when_missing():
         completed(["tmux"], returncode=1),
         completed(["tmux"]),
     )
-    controller = TmuxController("atmux", runner=runner)
+    controller = TmuxController("aip", runner=runner)
 
     created = controller.ensure_session(start_directory="/tmp/work")
 
@@ -33,7 +33,7 @@ def test_ensure_session_creates_session_when_missing():
         "new-session",
         "-d",
         "-s",
-        "atmux",
+        "aip",
         "-n",
         "orchestrator",
         "-c",
@@ -49,7 +49,7 @@ def test_list_windows_parses_tmux_output():
             stdout="0\torchestrator\tbash\t1\n1\tcoder\tpython\t0\n",
         )
     )
-    controller = TmuxController("atmux", runner=runner)
+    controller = TmuxController("aip", runner=runner)
 
     windows = controller.list_windows()
 
@@ -60,7 +60,7 @@ def test_list_windows_parses_tmux_output():
 
 def test_capture_pane_uses_line_limit_and_session_target():
     runner = FakeRunner(completed(["tmux"], stdout="latest output"))
-    controller = TmuxController("atmux", runner=runner)
+    controller = TmuxController("aip", runner=runner)
 
     output = controller.capture_pane("coder", lines=50)
 
@@ -70,7 +70,7 @@ def test_capture_pane_uses_line_limit_and_session_target():
         "capture-pane",
         "-p",
         "-t",
-        "atmux:coder",
+        "aip:coder",
         "-S",
         "-50",
     ]
@@ -78,7 +78,7 @@ def test_capture_pane_uses_line_limit_and_session_target():
 
 def test_send_keys_appends_enter_by_default():
     runner = FakeRunner(completed(["tmux"]))
-    controller = TmuxController("atmux", runner=runner)
+    controller = TmuxController("aip", runner=runner)
 
     controller.send_keys("coder", "implement auth")
 
@@ -86,7 +86,7 @@ def test_send_keys_appends_enter_by_default():
         "tmux",
         "send-keys",
         "-t",
-        "atmux:coder",
+        "aip:coder",
         "implement auth",
         "Enter",
     ]

@@ -1,11 +1,11 @@
 #!/bin/bash
-# ATMUX Live Demo
+# agent-nexus Live Demo
 # Demonstrates full orchestration cycle with real tmux agents
 
 set -e
 
 echo "============================================================"
-echo "ATMUX Live Demo: Multi-Agent Orchestration"
+echo "agent-nexus Live Demo: Multi-Agent Orchestration"
 echo "============================================================"
 echo ""
 echo "This demo shows:"
@@ -20,10 +20,10 @@ read
 
 # Initialize
 echo ""
-echo "📦 Initializing ATMUX..."
-python -m atmux init --ensure-session
+echo "📦 Initializing agent-nexus..."
+python -m aip init --ensure-session
 echo "✓ Workspace created"
-echo "✓ tmux session 'atmux' created"
+echo "✓ tmux session 'anex' created"
 echo ""
 echo "Press Enter to continue..."
 read
@@ -39,13 +39,13 @@ read
 # Spawn agents
 echo ""
 echo "🤖 Spawning agents..."
-python -m atmux agent spawn coder "bash"
-python -m atmux agent spawn reviewer "bash"
-python -m atmux agent spawn tester "bash"
+python -m aip agent spawn coder "bash"
+python -m aip agent spawn reviewer "bash"
+python -m aip agent spawn tester "bash"
 echo "✓ Spawned 3 agents"
 echo ""
 echo "Current agents:"
-python -m atmux agent list | jq -r '.[] | "  - \(.name) (window \(.index))"'
+python -m aip agent list | jq -r '.[] | "  - \(.name) (window \(.index))"'
 echo ""
 echo "Press Enter to continue..."
 read
@@ -57,14 +57,14 @@ echo ""
 
 # Task 1
 echo "Creating task: implement login feature..."
-atmux-mcp --workspace workspace --agent-name orchestrator <<EOF
+aip-mcp --workspace workspace --agent-name orchestrator <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request_task","arguments":{"task_description":"implement login feature with JWT","target_role":"coder","priority":"high"}}}
 EOF
 
 # Task 2
 echo "Creating task: write unit tests..."
-atmux-mcp --workspace workspace --agent-name orchestrator <<EOF
+aip-mcp --workspace workspace --agent-name orchestrator <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request_task","arguments":{"task_description":"write unit tests for login","target_role":"tester","priority":"medium"}}}
 EOF
@@ -73,7 +73,7 @@ echo ""
 echo "✓ Created 2 tasks"
 echo ""
 echo "Pending tasks:"
-python -m atmux task list --stage pending | jq -r '.[] | "  - \(.task_id): \(.description)"'
+python -m aip task list --stage pending | jq -r '.[] | "  - \(.task_id): \(.description)"'
 echo ""
 echo "Press Enter to continue..."
 read
@@ -81,13 +81,13 @@ read
 # Coder claims and works
 echo ""
 echo "👨‍💻 Coder claiming task..."
-TASK_ID=$(python -m atmux task list --stage pending | jq -r '.[0].task_id')
-python -m atmux task claim "$TASK_ID" coder
+TASK_ID=$(python -m aip task list --stage pending | jq -r '.[0].task_id')
+python -m aip task claim "$TASK_ID" coder
 echo "✓ Coder claimed $TASK_ID"
 echo ""
 
 echo "Coder reporting status..."
-atmux-mcp --workspace workspace --agent-name coder <<EOF
+aip-mcp --workspace workspace --agent-name coder <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"report_status","arguments":{"status":"working","message":"implementing JWT login"}}}
 EOF
@@ -95,7 +95,7 @@ echo "✓ Status: working"
 echo ""
 
 echo "Coder reporting progress..."
-atmux-mcp --workspace workspace --agent-name coder <<EOF
+aip-mcp --workspace workspace --agent-name coder <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"report_progress","arguments":{"progress":"2 of 3 files done","percentage":67}}}
 EOF
@@ -107,18 +107,18 @@ read
 # Coder completes
 echo ""
 echo "Coder exporting summary..."
-atmux-mcp --workspace workspace --agent-name coder <<EOF
+aip-mcp --workspace workspace --agent-name coder <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"export_summary","arguments":{"content":"## Login Feature\n\nImplemented JWT-based login:\n- POST /api/login endpoint\n- Token expiry: 1 hour\n- Refresh token support\n- Tests: 12/12 passing","task_id":"$TASK_ID"}}}
 EOF
 echo "✓ Summary exported"
 echo ""
 
-python -m atmux task complete "$TASK_ID" --agent-name coder
+python -m aip task complete "$TASK_ID" --agent-name coder
 echo "✓ Task marked complete"
 echo ""
 
-atmux-mcp --workspace workspace --agent-name coder <<EOF
+aip-mcp --workspace workspace --agent-name coder <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"report_status","arguments":{"status":"finished","message":"login feature complete"}}}
 EOF
@@ -158,7 +158,7 @@ read
 echo ""
 echo "🎯 Orchestrator delegating review..."
 SUMMARY_FILE=$(ls -t workspace/summaries/coder-*.md | head -1)
-atmux-mcp --workspace workspace --agent-name orchestrator <<EOF
+aip-mcp --workspace workspace --agent-name orchestrator <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request_task","arguments":{"task_description":"review login implementation","target_role":"reviewer","priority":"high","context":"See $SUMMARY_FILE"}}}
 EOF
@@ -189,11 +189,11 @@ echo "  The orchestrator reads files, not panes (token-efficient)."
 echo "  The event log is the single source of truth."
 echo ""
 echo "To explore:"
-echo "  - tmux attach -t atmux    # Watch agents in real-time"
+echo "  - tmux attach -t aip    # Watch agents in real-time"
 echo "  - cat workspace/events.jsonl | jq    # View event log"
 echo "  - cat workspace/summaries/coder-*.md    # Read agent output"
 echo ""
 echo "To cleanup:"
-echo "  - tmux kill-session -t atmux"
+echo "  - tmux kill-session -t anex"
 echo "  - rm -rf workspace"
 echo ""

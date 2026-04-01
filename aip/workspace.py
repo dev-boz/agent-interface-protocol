@@ -14,7 +14,7 @@ VALID_STATUSES = frozenset({"working", "blocked", "failed", "finished", "idle"})
 _TASK_ID_PATTERN = re.compile(r"task-(\d+)", re.IGNORECASE)
 
 
-logger = logging.getLogger("atmux.workspace")
+logger = logging.getLogger("aip.workspace")
 
 
 def utc_now() -> datetime:
@@ -48,7 +48,7 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
-class AtmuxWorkspace:
+class AipWorkspace:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
 

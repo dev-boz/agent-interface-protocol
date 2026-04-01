@@ -1,31 +1,50 @@
-# ATMUX Quick Reference Card
+# agent-nexus Quick Reference Card
 
 ## Essential Commands
 
 ### Session Management
 ```bash
-atmux init --ensure-session              # Initialize workspace + tmux session
-tmux attach -t atmux                     # Watch agents in real-time
+aip init --ensure-session              # Initialize workspace + tmux session
+tmux attach -t aip                     # Watch agents in real-time
 tmux detach                              # (or Ctrl-b d) Exit without killing
 ```
 
 ### Agent Operations
 ```bash
-atmux agent spawn <name> <command>       # Spawn new agent
-atmux agent list                         # List all agents
-atmux agent capture <name> --lines 5     # Read agent output (last 5 lines)
-atmux agent send <name> "text"           # Send command to agent
-atmux agent kill <name>                  # Kill agent
+aip agent spawn <name> <command>       # Spawn new agent
+aip agent list                         # List all agents
+aip agent capture <name> --lines 5     # Read agent output (last 5 lines)
+aip agent send <name> "text"           # Send command to agent
+aip agent kill <name>                  # Kill agent
 ```
 
 ### Task Queue
 ```bash
-atmux task list                          # List pending tasks
-atmux task list --stage claimed          # List claimed tasks
-atmux task list --stage done             # List completed tasks
-atmux task claim <id> <agent>            # Claim a task
-atmux task complete <id>                 # Mark task done
-atmux task reclaim-expired               # Reclaim expired tasks
+aip task list                          # List pending tasks
+aip task list --stage claimed          # List claimed tasks
+aip task list --stage done             # List completed tasks
+aip task list --claimable              # List pending tasks with all blocked_by deps met
+aip task claim <id> <agent>            # Claim a task
+aip task complete <id>                 # Mark task done
+aip task reclaim-expired               # Reclaim expired tasks
+```
+
+### Hook Integration
+```bash
+aip hook print-config --cli gemini --agent-name coder --tool-profile worker
+aip hook install --cli gemini --agent-name coder --tool-profile worker --config-root /repo
+aip hook install --cli kiro --agent-name reviewer --tool-profile reviewer --config-root /repo
+aip hook install --cli codex --agent-name architect --tool-profile architect --config-root /repo
+aip hook install --cli cursor --agent-name editor --tool-profile worker --config-root /repo
+aip hook install --cli qwen --agent-name analyst --tool-profile worker --config-root /repo
+```
+
+### Shim Commands (Tier 2 CLIs)
+```bash
+aip shim watch --agent-name vibe-worker --cli vibe    # Start aip-shim lifecycle watcher
+aip shim watch --agent-name amp-worker --cli amp      # Works for any Tier 2 CLI
+aip shim check --agent-name vibe-worker               # Check shim status
+aip shim list-profiles                                # List available shim profiles
 ```
 
 ### Monitoring
@@ -39,7 +58,7 @@ ls workspace/summaries/                  # List agent outputs
 
 ## MCP Tools (For Agents)
 
-Agents with atmux-mcp installed have these tools:
+Agents with `aip-mcp` installed get a profile-specific subset of these tools:
 
 ### report_status
 ```json
@@ -48,6 +67,7 @@ Agents with atmux-mcp installed have these tools:
   "message": "optional context"
 }
 ```
+Fallback tool for hookless CLIs.
 
 ### export_summary
 ```json
@@ -75,7 +95,8 @@ Agents with atmux-mcp installed have these tools:
   "task_description": "what needs to be done",
   "target_role": "coder",
   "priority": "high|normal|low",
-  "context": "reference to files, not pasted content"
+  "context": "reference to files, not pasted content",
+  "blocked_by": ["task-id-1", "task-id-2"]
 }
 ```
 
@@ -86,6 +107,45 @@ Agents with atmux-mcp installed have these tools:
   "percentage": 60
 }
 ```
+Fallback tool for hookless CLIs.
+
+### wait_for
+```json
+{
+  "event_filter": "agent:coder,status:finished",
+  "timeout": 30
+}
+```
+
+### spawn_teammate
+```json
+{
+  "name": "reviewer",
+  "cli_type": "gemini",
+  "capabilities": ["review", "testing"]
+}
+```
+
+### notify
+```json
+{
+  "target_agent": "coder",
+  "message": "hold off on auth.py edits",
+  "priority": "high",
+  "elicit": true
+}
+```
+When `elicit` is `true`, uses MCP elicitation for interactive delivery (supported: claude-code, codex, cursor, qwen).
+
+### Common Profiles
+
+| Profile | Use |
+|---|---|
+| `worker` | Hook-capable workers |
+| `worker-hookless` | Workers on Amp, Aider, or other hookless CLIs |
+| `reviewer` / `architect` | Advisory agents |
+| `manager` | Delegation-heavy coordinators |
+| `full` / `orchestrator` | Broad control surface |
 
 ---
 
@@ -155,7 +215,7 @@ cat workspace/summaries/coder-latest.md
 
 ```
 pending/task-042.md
-    ↓ (agent claims via atomic mv)
+    ↓ (agent claims via atomic mv — blocked_by deps must be done first)
 claimed/coder-task-042.md
     ↓ (agent completes)
 done/task-042.md
@@ -165,13 +225,27 @@ failed/task-042.md
 pending/task-042.md
 ```
 
+### Task File Format
+```markdown
+# task-042
+type: coding
+priority: high
+target_role: coder
+description: implement oauth login
+context: see summaries/architect-0317-1400.md
+blocked_by: task-040, task-041
+created_at: 2026-03-17T14:25:15Z
+```
+
+Tasks with `blocked_by` remain unclaimable until all listed task IDs reach `done`. Use `aip task list --claimable` to see only tasks with satisfied dependencies.
+
 ---
 
 ## Fault Tolerance
 
 ### Agent Crash
 - Task stays in `claimed/` with lease
-- After expiry → `atmux task reclaim-expired`
+- After expiry → `aip task reclaim-expired`
 - Last summary persists in workspace
 
 ### Orchestrator Crash
@@ -191,13 +265,13 @@ pending/task-042.md
 ### Spawn Multiple Agents
 ```bash
 for role in coder reviewer tester; do
-  atmux agent spawn $role "gemini"
+  aip agent spawn $role "gemini"
 done
 ```
 
 ### Monitor All Agents
 ```bash
-atmux agent list | jq -r '.[].name' | while read agent; do
+aip agent list | jq -r '.[].name' | while read agent; do
   echo "=== $agent ==="
   cat workspace/status/$agent.json 2>/dev/null || echo "No status"
 done
@@ -206,14 +280,14 @@ done
 ### Reclaim Stale Tasks
 ```bash
 # Run periodically (e.g., every 5 minutes)
-atmux task reclaim-expired
+aip task reclaim-expired
 ```
 
 ### Export Agent Output Before Kill
 ```bash
-atmux agent send coder "/export"
+aip agent send coder "/export"
 sleep 2
-atmux agent kill coder
+aip agent kill coder
 ```
 
 ---
@@ -227,12 +301,12 @@ tail -f workspace/events.jsonl | jq -r '"[\(.ts | split("T")[1] | split(".")[0])
 
 ### Check Agent Output
 ```bash
-atmux agent capture <name> --lines 20
+aip agent capture <name> --lines 20
 ```
 
 ### Attach to tmux Session
 ```bash
-tmux attach -t atmux
+tmux attach -t aip
 # Navigate: Ctrl-b n (next window), Ctrl-b p (previous window)
 # Detach: Ctrl-b d
 ```
@@ -257,8 +331,8 @@ cat workspace/tasks/claimed/coder-task-042.md
 ## Installation
 
 ```bash
-cd tools/atmux
-pip install -e .          # installs atmux and atmux-mcp commands
+cd /path/to/agent-nexus
+pip install -e .          # installs aip and aip-mcp commands
 pip install -e '.[dev]'   # also installs pytest for development
 ```
 
@@ -275,29 +349,33 @@ python -m pytest -v       # Run unit tests only
 
 ---
 
-## MCP Configuration
+## Integration Configuration
 
-Add to your CLI agent's config file:
+Preferred path for supported CLIs:
 
-**Gemini** (`~/.gemini/settings.json`):
-```json
-{
-  "mcpServers": {
-    "atmux": {
-      "command": "atmux-mcp",
-      "args": ["--workspace", "/path/to/workspace", "--agent-name", "coder"]
-    }
-  }
-}
+```bash
+aip hook install --cli gemini --agent-name coder --tool-profile worker --config-root /repo
+aip hook install --cli kiro --agent-name reviewer --tool-profile reviewer --config-root /repo
+aip hook install --cli codex --agent-name architect --tool-profile architect --config-root /repo
+aip hook install --cli cursor --agent-name editor --tool-profile worker --config-root /repo
+aip hook install --cli qwen --agent-name analyst --tool-profile worker --config-root /repo
 ```
 
-**Claude Code** (`.mcp.json` in project root):
+For Tier 2 CLIs (Vibe, Amp), use the shim watcher:
+
+```bash
+aip shim watch --agent-name vibe-worker --cli vibe
+aip shim watch --agent-name amp-worker --cli amp
+```
+
+For MCP-only CLIs, add `aip-mcp` manually:
+
 ```json
 {
   "mcpServers": {
-    "atmux": {
-      "command": "atmux-mcp",
-      "args": ["--workspace", "/path/to/workspace", "--agent-name", "coder"]
+    "aip": {
+      "command": "aip-mcp",
+      "args": ["--workspace", "/path/to/workspace", "--agent-name", "amp-worker", "--session-name", "aip", "--tool-profile", "worker-hookless"]
     }
   }
 }
@@ -305,11 +383,11 @@ Add to your CLI agent's config file:
 
 ---
 
-## What ATMUX Replaces
+## What agent-nexus Replaces
 
-| Traditional | ATMUX |
+| Traditional | agent-nexus |
 |-------------|-------|
-| ACP protocol | 5 MCP tools |
+| ACP protocol | Selective MCP tools + hooks |
 | SSE streaming | tmux pane buffer |
 | Message broker | tmux server |
 | Service discovery | `tmux list-windows` |
@@ -321,4 +399,26 @@ Add to your CLI agent's config file:
 
 ---
 
-**For full documentation, see README.md and atmux.md**
+**For full documentation, see README.md and agent-nexus.md**
+
+---
+
+## Backend Compatibility Matrix
+
+| Backend | CLI Name | Launch Command | Tier | Hook Config Path |
+|---|---|---|---|---|
+| Claude Code | claude-code | `claude` | Tier 1 (native) | `.claude/settings.json` |
+| Copilot | copilot | `copilot` | Tier 1 (native) | `.github/copilot/hooks.json` |
+| Gemini | gemini | `gemini` | Tier 1 (native) | `.gemini/settings.json` |
+| Kiro | kiro | `kiro-cli` | Tier 1 (native) | `.kiro/agents/{name}.json` |
+| Codex | codex | `codex` | Tier 1 (native) | `.codex/hooks.json` + `config.toml` |
+| OpenCode | opencode | `opencode` | Tier 1 (native) | Plugin events |
+| Cursor | cursor | `agent` | Tier 1 (native) | `.cursor/settings.json` |
+| Qwen | qwen | `qwen` | Tier 1 (native) | `.qwen/settings.json` |
+| Kilo | kilo | `kilo` | Tier 1 (native) | Plugin events (opencode fork) |
+| Vibe (Mistral) | vibe | `vibe` | Tier 2 (shim) | `aip-shim` intercept |
+| Amp | amp | `amp` | Tier 2 (shim) | `aip-shim` intercept |
+
+**Tier 1 (native)**: CLI has built-in hook/plugin support; `aip hook install` writes config directly.
+**Tier 2 (shim)**: No native hooks; `aip-shim` provides lifecycle telemetry via process monitoring.
+**MCP-only**: No hooks or shim; agent uses MCP tools (`report_status`, `report_progress`) as fallback.

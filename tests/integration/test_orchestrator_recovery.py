@@ -11,9 +11,9 @@ import time
 from pathlib import Path
 
 def run_atmux(args):
-    """Run atmux command and return parsed JSON output."""
+    """Run aip command and return parsed JSON output."""
     result = subprocess.run(
-        ["python3", "-m", "atmux"] + args,
+        ["python3", "-m", "aip"] + args,
         capture_output=True,
         text=True,
         check=True
@@ -23,7 +23,7 @@ def run_atmux(args):
 def send_mcp_tool_call(agent_name, tool_name, arguments):
     """Send a tool call to an agent's MCP server."""
     proc = subprocess.Popen(
-        ["atmux-mcp", "--workspace", "workspace", "--agent-name", agent_name],
+        ["aip-mcp", "--workspace", "workspace", "--agent-name", agent_name],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -65,7 +65,7 @@ def send_mcp_tool_call(agent_name, tool_name, arguments):
 
 def main():
     print("=" * 60)
-    print("ATMUX Test: Orchestrator Crash Recovery")
+    print("agent-interface-protocol Test: Orchestrator Crash Recovery")
     print("=" * 60)
 
     # Phase 1: Initial orchestrator sets up work
@@ -221,7 +221,7 @@ def main():
     print("  - Task queue maintained consistency")
     print("  - New orchestrator picked up seamlessly")
     print("  - No work was lost")
-    print("\nThis demonstrates ATMUX's fault tolerance:")
+    print("\nThis demonstrates agent-interface-protocol fault tolerance:")
     print("  The orchestrator is just another agent, not special infrastructure.")
     print("  Any agent can read the workspace and become the orchestrator.")
 

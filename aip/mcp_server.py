@@ -11,14 +11,76 @@ from typing import Any
 from . import __version__
 from .tasks import TaskQueue
 from .tmux import TmuxController
-from .workspace import AtmuxWorkspace, VALID_STATUSES, sanitize_component
+from .workspace import AipWorkspace, VALID_STATUSES, sanitize_component
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     stream=sys.stderr,
 )
-logger = logging.getLogger("atmux-mcp")
+logger = logging.getLogger("aip-mcp")
+
+# CLI backends that support mid-stream message injection and their command
+# templates.  The placeholder ``{message}`` is replaced with the actual
+# notification text.  CLIs not listed here fall back to event-log-only
+# delivery.
+#
+# Confirmed working via tmux send-keys:
+#   claude-code:  /btw slash command injects into active thinking
+#   codex:        typed text + Enter injects into current turn ("steer")
+#   gemini:       model steering (experimental) — typed text + Enter while
+#                 spinner is visible becomes a hint for the next reasoning step
+#   copilot:      typed text + Enter sends at next gap in thinking/tool use;
+#                 Ctrl+Enter enqueues for after current task finishes
+#
+# Known support but unreliable via tmux send-keys:
+#   cursor:       Ctrl+Enter interrupts / Alt+Enter queues — special key
+#                 sequences don't translate reliably through tmux
+#
+# Not yet shipped:
+#   opencode:     PR #17233 adds steer mode setting (not released)
+#   kilo:         fork of opencode — will inherit when upstream ships
+#
+# Queue only (next turn, not mid-stream):
+#   amp:          command palette → queue — delivers after current turn
+#
+# No support:
+#   kiro, mistral/vibe, qodo
+INJECTION_COMMANDS: dict[str, str] = {
+    "claude-code": "/btw {message}",
+    "codex": "{message}",
+    "copilot": "{message}",
+    "gemini": "{message}",
+    "cursor": "{message}",
+    "qwen": "/btw {message}",
+}
+
+# CLIs that support MCP elicitation (structured dialog that forces a response).
+# When elicit=true on a notify call, the MCP server returns an elicitation
+# request for these CLIs instead of (or in addition to) injection.
+ELICITATION_SUPPORTED: frozenset[str] = frozenset({
+    "claude-code",
+    "codex",
+    "cursor",
+    "qwen",
+})
+
+# Maps logical CLI names to the shell command used to launch the agent in tmux.
+# Used by spawn_teammate when the caller provides a CLI name rather than a raw
+# command string.
+BACKEND_LAUNCH_COMMANDS: dict[str, str] = {
+    "claude-code": "claude",
+    "copilot": "copilot",
+    "gemini": "gemini",
+    "kiro": "kiro-cli",
+    "codex": "codex",
+    "opencode": "opencode",
+    "cursor": "agent",
+    "qwen": "qwen",
+    "kilo": "kilo",
+    "vibe": "vibe",
+    "amp": "amp",
+}
 
 INTERESTS_SCHEMA = {
     "type": "object",
@@ -111,6 +173,11 @@ TOOL_SPECS = (
                 "task_description": {"type": "string"},
                 "context": {"type": "string"},
                 "priority": {"type": "string"},
+                "blocked_by": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Task IDs that must complete before this task can be claimed.",
+                },
             },
             "required": ["task_description"],
             "additionalProperties": False,
@@ -172,26 +239,99 @@ TOOL_SPECS = (
             "additionalProperties": False,
         },
     },
+    {
+        "name": "notify",
+        "description": "Send a direct message to another agent (or all agents) via the event log.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_agent": {"type": "string", "description": "Agent name or \"all\" for broadcast."},
+                "message": {"type": "string"},
+                "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                "elicit": {
+                    "type": "boolean",
+                    "description": "If true and CLI supports MCP elicitation, pop a structured dialog forcing the agent to respond.",
+                },
+            },
+            "required": ["target_agent", "message", "priority"],
+            "additionalProperties": False,
+        },
+    },
 )
+
+TOOL_NAMES = tuple(spec["name"] for spec in TOOL_SPECS)
+
+TOOL_PROFILES: dict[str, tuple[str, ...]] = {
+    "full": TOOL_NAMES,
+    "orchestrator": TOOL_NAMES,
+    "worker": (
+        "export_summary",
+        "register_capabilities",
+    ),
+    "worker-hookless": (
+        "report_status",
+        "report_progress",
+        "export_summary",
+        "register_capabilities",
+    ),
+    "reviewer": (
+        "export_summary",
+        "notify",
+        "register_capabilities",
+    ),
+    "architect": (
+        "export_summary",
+        "notify",
+        "register_capabilities",
+    ),
+    "manager": (
+        "export_summary",
+        "register_capabilities",
+        "request_task",
+        "wait_for",
+        "spawn_teammate",
+    ),
+}
 
 
 class ToolInputError(ValueError):
-    """Raised when tool input does not satisfy ATMUX expectations."""
+    """Raised when tool input does not satisfy AIP expectations."""
 
 
-class AtmuxToolRuntime:
+def resolve_allowed_tools(
+    *,
+    tool_profile: str = "full",
+    allowed_tools: list[str] | tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    if allowed_tools:
+        resolved = tuple(dict.fromkeys(tool_name.strip() for tool_name in allowed_tools if tool_name.strip()))
+        unknown = [tool_name for tool_name in resolved if tool_name not in TOOL_NAMES]
+        if unknown:
+            raise ToolInputError(f"Unknown tool(s): {', '.join(unknown)}")
+        return resolved
+
+    try:
+        return TOOL_PROFILES[tool_profile]
+    except KeyError as exc:
+        valid = ", ".join(sorted(TOOL_PROFILES))
+        raise ToolInputError(f"Unknown tool_profile: {tool_profile}. Valid profiles: {valid}") from exc
+
+
+class AipToolRuntime:
     def __init__(
         self,
         workspace_root: str,
         agent_name: str,
         *,
-        session_name: str = "atmux",
+        session_name: str = "aip",
         tmux_controller: TmuxController | None = None,
         poll_interval: float = 0.1,
         max_depth: int = 3,
         max_breadth: int = 4,
+        tool_profile: str = "full",
+        allowed_tools: list[str] | tuple[str, ...] | None = None,
     ) -> None:
-        self.workspace = AtmuxWorkspace(workspace_root)
+        self.workspace = AipWorkspace(workspace_root)
         self.workspace.ensure()
         self.queue = TaskQueue(self.workspace)
         self.agent_name = agent_name
@@ -200,8 +340,16 @@ class AtmuxToolRuntime:
         self.poll_interval = poll_interval
         self.max_depth = max_depth
         self.max_breadth = max_breadth
+        self.tool_profile = tool_profile
+        self.allowed_tools = frozenset(
+            resolve_allowed_tools(tool_profile=tool_profile, allowed_tools=allowed_tools)
+        )
 
     def execute(self, name: str, arguments: dict[str, Any] | None) -> str:
+        if name not in TOOL_NAMES:
+            raise ToolInputError(f"Unknown tool: {name}")
+        if name not in self.allowed_tools:
+            raise ToolInputError(f"Tool not enabled for profile '{self.tool_profile}': {name}")
         args = arguments or {}
         if name == "report_status":
             return self.report_status(args["status"], message=args.get("message"))
@@ -215,6 +363,7 @@ class AtmuxToolRuntime:
                 target_role=args.get("target_role"),
                 context=args.get("context"),
                 priority=args.get("priority"),
+                blocked_by=args.get("blocked_by"),
             )
         if name == "report_progress":
             return self.report_progress(args["progress"], percentage=args.get("percentage"))
@@ -229,7 +378,17 @@ class AtmuxToolRuntime:
                 parent_id=args.get("parent_id"),
                 depth=args.get("depth"),
             )
+        if name == "notify":
+            return self.notify(
+                target_agent=args["target_agent"],
+                message=args["message"],
+                priority=args["priority"],
+                elicit=args.get("elicit", False),
+            )
         raise ToolInputError(f"Unknown tool: {name}")
+
+    def list_tool_specs(self) -> list[dict[str, Any]]:
+        return [spec for spec in TOOL_SPECS if spec["name"] in self.allowed_tools]
 
     def report_status(self, status: str, *, message: str | None = None) -> str:
         if status not in VALID_STATUSES:
@@ -295,6 +454,7 @@ class AtmuxToolRuntime:
         target_role: str | None = None,
         context: str | None = None,
         priority: str | None = None,
+        blocked_by: list[str] | None = None,
     ) -> str:
         task = self.queue.create_task(
             description=task_description,
@@ -303,11 +463,13 @@ class AtmuxToolRuntime:
             target_role=target_role,
             context=context,
             requested_by=self.agent_name,
+            blocked_by=blocked_by,
         )
         return json.dumps(
             {
                 "task_id": task.task_id,
                 "path": f"tasks/pending/{task.task_id}.md",
+                "blocked_by": task.blocked_by or None,
             },
             indent=2,
         )
@@ -457,6 +619,73 @@ class AtmuxToolRuntime:
             indent=2,
         )
 
+    def notify(self, *, target_agent: str, message: str, priority: str, elicit: bool = False) -> str:
+        valid_priorities = {"high", "medium", "low"}
+        if priority not in valid_priorities:
+            raise ToolInputError(f"Invalid priority: {priority}. Must be one of {valid_priorities}")
+        target = target_agent.strip()
+        if not target:
+            raise ToolInputError("target_agent must not be empty")
+        msg = message.strip()
+        if not msg:
+            raise ToolInputError("message must not be empty")
+
+        # Always append to event log (permanent record).
+        self.workspace.append_event(
+            self.agent_name,
+            "notify",
+            target=target,
+            priority=priority,
+            message=msg,
+            elicit=elicit if elicit else None,
+        )
+
+        # Dual-mode: high priority + injection-capable CLI → send mid-stream.
+        injected_to: list[str] = []
+        elicitation_targets: list[str] = []
+        if priority == "high":
+            targets = self._resolve_notify_targets(target)
+            for agent_id, cli_type in targets:
+                if elicit and cli_type in ELICITATION_SUPPORTED:
+                    elicitation_targets.append(agent_id)
+                    continue
+                template = INJECTION_COMMANDS.get(cli_type)
+                if template is not None:
+                    inject_text = template.replace("{message}", f"{self.agent_name} says: {msg}")
+                    try:
+                        self.tmux.send_keys(agent_id, inject_text)
+                        injected_to.append(agent_id)
+                    except Exception:
+                        logger.warning("Failed to inject notify into pane %s", agent_id)
+
+        result: dict[str, Any] = {
+            "sent": True,
+            "from": self.agent_name,
+            "target": target,
+            "priority": priority,
+            "injected_to": injected_to,
+        }
+        if elicit:
+            result["elicit"] = True
+            result["elicitation_targets"] = elicitation_targets
+        return json.dumps(result, indent=2)
+
+    def _resolve_notify_targets(self, target: str) -> list[tuple[str, str]]:
+        """Return (agent_id, cli_type) pairs for injection candidates."""
+        if target == "all":
+            tree = self.workspace.read_agent_tree()
+            return [
+                (agent_id, node.get("cli_type", ""))
+                for agent_id, node in tree.items()
+                if agent_id != self.agent_name
+            ]
+        # Single target — check agent tree first, then status file.
+        tree = self.workspace.read_agent_tree()
+        if target in tree:
+            return [(target, tree[target].get("cli_type", ""))]
+        status = self.workspace.read_status(target)
+        return [(target, status.get("cli_type", ""))]
+
     def _read_events_from_offset(self, offset: int) -> tuple[int, list[dict[str, Any]]]:
         with self.workspace.events_path.open("r", encoding="utf-8") as handle:
             handle.seek(offset)
@@ -515,15 +744,15 @@ def _import_mcp_sdk():
     return Server, stdio_server, TextContent, Tool
 
 
-def create_mcp_server(runtime: AtmuxToolRuntime):
+def create_mcp_server(runtime: AipToolRuntime):
     """Build an MCP SDK server wired to our tool runtime."""
     Server, stdio_server, TextContent, Tool = _import_mcp_sdk()
 
     server = Server(
-        "atmux-mcp",
+        "aip-mcp",
         version=__version__,
         instructions=(
-            "Use the ATMUX tools to publish status, progress, summaries, and delegated tasks "
+            "Use the agent-interface-protocol tools to publish status, progress, summaries, and delegated tasks "
             "into the shared workspace."
         ),
     )
@@ -532,7 +761,7 @@ def create_mcp_server(runtime: AtmuxToolRuntime):
     async def list_tools() -> list:
         return [
             Tool(name=spec["name"], description=spec["description"], inputSchema=spec["inputSchema"])
-            for spec in TOOL_SPECS
+            for spec in runtime.list_tool_specs()
         ]
 
     @server.call_tool()
@@ -546,31 +775,57 @@ def create_mcp_server(runtime: AtmuxToolRuntime):
     return server, stdio_server
 
 
-async def _run(workspace: str, agent_name: str, session_name: str = "atmux") -> None:
-    runtime = AtmuxToolRuntime(workspace, agent_name, session_name=session_name)
+async def _run(
+    workspace: str,
+    agent_name: str,
+    session_name: str = "aip",
+    *,
+    tool_profile: str = "full",
+    allowed_tools: list[str] | None = None,
+) -> None:
+    runtime = AipToolRuntime(
+        workspace,
+        agent_name,
+        session_name=session_name,
+        tool_profile=tool_profile,
+        allowed_tools=allowed_tools,
+    )
     server, stdio_server = create_mcp_server(runtime)
-    logger.info("atmux-mcp starting (workspace=%s, agent=%s)", workspace, agent_name)
+    logger.info("aip-mcp starting (workspace=%s, agent=%s)", workspace, agent_name)
 
     async with stdio_server() as (read_stream, write_stream):
-        logger.info("atmux-mcp stdio connected, serving tools")
+        logger.info("aip-mcp stdio connected, serving tools")
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="atmux-mcp")
+    parser = argparse.ArgumentParser(prog="aip-mcp")
     parser.add_argument("--workspace", default="workspace")
     parser.add_argument("--agent-name", default="agent")
-    parser.add_argument("--session-name", default="atmux")
+    parser.add_argument("--session-name", default="aip")
+    parser.add_argument("--tool-profile", default="full")
+    parser.add_argument("--allowed-tool", action="append", default=[])
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
-        asyncio.run(_run(args.workspace, args.agent_name, args.session_name))
+        asyncio.run(
+            _run(
+                args.workspace,
+                args.agent_name,
+                args.session_name,
+                tool_profile=args.tool_profile,
+                allowed_tools=args.allowed_tool,
+            )
+        )
     except KeyboardInterrupt:
         logger.info("Server stopped")
         raise SystemExit(0)
+    except ToolInputError as exc:
+        logger.error("%s", exc)
+        raise SystemExit(2)
     except Exception:
         logger.exception("Server crashed")
         raise SystemExit(1)

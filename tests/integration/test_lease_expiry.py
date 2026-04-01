@@ -7,9 +7,9 @@ import time
 from pathlib import Path
 
 def run_atmux(args):
-    """Run atmux command and return parsed JSON output."""
+    """Run aip command and return parsed JSON output."""
     result = subprocess.run(
-        ["python3", "-m", "atmux"] + args,
+        ["python3", "-m", "aip"] + args,
         capture_output=True,
         text=True,
         check=True
@@ -22,7 +22,7 @@ def main():
     # Create a task via MCP
     print("1. Creating task via MCP...")
     proc = subprocess.Popen(
-        ["atmux-mcp", "--workspace", "workspace", "--agent-name", "test-agent"],
+        ["aip-mcp", "--workspace", "workspace", "--agent-name", "test-agent"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

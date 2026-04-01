@@ -7,7 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .workspace import (
-    AtmuxWorkspace,
+    AipWorkspace,
     atomic_write_text,
     isoformat_z,
     parse_isoformat,
@@ -60,6 +60,7 @@ class Task:
     created_at: str | None = None
     claimed_by: str | None = None
     lease_expires: str | None = None
+    blocked_by: list[str] = field(default_factory=list)
     body: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
 
@@ -74,6 +75,7 @@ class Task:
             ("created_at", self.created_at or ""),
             ("claimed_by", self.claimed_by or ""),
             ("lease_expires", self.lease_expires or ""),
+            ("blocked_by", ", ".join(self.blocked_by) if self.blocked_by else ""),
         )
         for key, value in ordered_fields:
             if value:
@@ -115,8 +117,13 @@ def parse_task(text: str) -> Task:
         "created_at",
         "claimed_by",
         "lease_expires",
+        "blocked_by",
     }
     extra = {key: value for key, value in metadata.items() if key not in known_fields}
+
+    blocked_by_raw = metadata.get("blocked_by", "")
+    blocked_by = [tid.strip() for tid in blocked_by_raw.split(",") if tid.strip()] if blocked_by_raw else []
+
     return Task(
         task_id=task_id,
         task_type=metadata.get("type", "general"),
@@ -127,13 +134,14 @@ def parse_task(text: str) -> Task:
         created_at=metadata.get("created_at") or None,
         claimed_by=metadata.get("claimed_by") or None,
         lease_expires=metadata.get("lease_expires") or None,
+        blocked_by=blocked_by,
         body=body,
         metadata=extra,
     )
 
 
 class TaskQueue:
-    def __init__(self, workspace: AtmuxWorkspace) -> None:
+    def __init__(self, workspace: AipWorkspace) -> None:
         self.workspace = workspace
         self.workspace.ensure()
 
@@ -148,7 +156,15 @@ class TaskQueue:
         body: str = "",
         task_id: str | None = None,
         requested_by: str = "system",
+        blocked_by: list[str] | None = None,
     ) -> Task:
+        cleaned_blocked_by = []
+        if blocked_by:
+            for tid in blocked_by:
+                stripped = tid.strip()
+                if stripped:
+                    _validate_task_id(stripped)
+                    cleaned_blocked_by.append(stripped)
         task = Task(
             task_id=_validate_task_id(task_id) if task_id else self.workspace.next_task_id(),
             task_type=_single_line(task_type) or "general",
@@ -157,6 +173,7 @@ class TaskQueue:
             description=_single_line(description),
             context=_single_line(context),
             created_at=isoformat_z(utc_now()),
+            blocked_by=cleaned_blocked_by,
             body=body.strip(),
         )
         task_path = self.workspace.pending_dir / f"{task.task_id}.md"
@@ -190,7 +207,18 @@ class TaskQueue:
         _validate_task_id(task_id)
         if lease_seconds <= 0:
             raise TaskError(f"lease_seconds must be positive, got {lease_seconds}")
+
+        # Check blocked_by before claiming
         source = self.workspace.pending_dir / f"{task_id}.md"
+        if source.exists():
+            candidate = self.read_task(source)
+            if candidate.blocked_by:
+                unresolved = self._unresolved_blockers(candidate.blocked_by)
+                if unresolved:
+                    raise TaskClaimError(
+                        f"Task {task_id} is blocked by unresolved dependencies: {', '.join(unresolved)}"
+                    )
+
         claimed_name = sanitize_component(agent_name)
         target = self.workspace.claimed_dir / f"{claimed_name}-{task_id}.md"
         try:
@@ -251,6 +279,24 @@ class TaskQueue:
     def list_claimed_tasks(self, agent_name: str) -> list[Task]:
         claimed_name = sanitize_component(agent_name)
         return [self.read_task(path) for path in sorted(self.workspace.claimed_dir.glob(f"{claimed_name}-*.md"))]
+
+    def list_claimable_tasks(self) -> list[Task]:
+        """Return pending tasks that have no unresolved blocked_by dependencies."""
+        tasks: list[Task] = []
+        for path in sorted(self.workspace.pending_dir.glob("*.md")):
+            task = self.read_task(path)
+            if not task.blocked_by or not self._unresolved_blockers(task.blocked_by):
+                tasks.append(task)
+        return tasks
+
+    def _unresolved_blockers(self, blocked_by: list[str]) -> list[str]:
+        """Return task IDs from blocked_by that are NOT in done/."""
+        unresolved: list[str] = []
+        for blocker_id in blocked_by:
+            done_path = self.workspace.done_dir / f"{blocker_id}.md"
+            if not done_path.exists():
+                unresolved.append(blocker_id)
+        return unresolved
 
     def requeue_tasks_for_agent(
         self,

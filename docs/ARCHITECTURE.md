@@ -1,4 +1,4 @@
-# ATMUX — Agent Teams Mux
+# agent-nexus — Agent Teams Mux
 
 ## The Core Insight
 
@@ -6,7 +6,7 @@ AI agents are Unix processes. They read input, they reason, they produce output.
 
 Instead of protocols (ACP, SSE), servers, message brokers, or frameworks — you need tmux, a shared filesystem, and one small MCP server.
 
-## How ATMUX Is Different
+## How agent-nexus Is Different
 
 Every existing tool in this space either adds unnecessary infrastructure or solves only part of the problem.
 
@@ -22,20 +22,20 @@ Every existing tool in this space either adds unnecessary infrastructure or solv
 | **claude-code-agent-farm** | 20+ parallel Claude Code agents | Single-vendor (Claude only), lock-based coordination |
 | **organisciak/atmux** | tmux session manager with browse/send | Session management only, no shared memory or MCP |
 
-**ATMUX is the only design where agents read each other directly via tmux panes, coordinate through one shared MCP server, and need zero servers, zero brokers, zero frameworks.**
+**agent-nexus is the only design where agents read each other directly via tmux panes, coordinate through one shared MCP server, and need zero servers, zero brokers, zero frameworks.**
 
 The key differences:
 
-- **No server**: CAO and CSP both require a running server process to broker messages. ATMUX has none. The tmux server IS the infrastructure.
-- **Agents are aware of each other**: dmux, NTM, and workmux run agents in parallel but agents don't know about each other. In ATMUX, any agent can read any other agent's pane.
-- **Vendor neutral**: claude-code-agent-farm is Claude-only. ATMUX works with any CLI agent — Claude, Gemini, Kimi, aider, Codex, anything.
-- **Minimal footprint**: Overstory has 36 CLI commands and a SQLite mail system. ATMUX is 5 MCP tools and tmux commands.
+- **No server**: CAO and CSP both require a running server process to broker messages. agent-nexus has none. The tmux server IS the infrastructure.
+- **Agents are aware of each other**: dmux, NTM, and workmux run agents in parallel but agents don't know about each other. In agent-nexus, any agent can read any other agent's pane.
+- **Vendor neutral**: claude-code-agent-farm is Claude-only. agent-nexus works with 11 supported backends across three tiers — claude-code, copilot, gemini, kiro, codex, opencode, cursor, qwen, kilo (Tier 1 native hooks), and amp, vibe/Mistral (Tier 2 aip-shim).
+- **Minimal footprint**: Overstory has 36 CLI commands and a SQLite mail system. agent-nexus stays small: selective MCP tools, CLI hooks where available, and tmux commands.
 - **The orchestrator is just another agent**: not a special process, not a server, not a framework. Any CLI agent can orchestrate. Swap orchestrators mid-session.
 
 ## Architecture
 
 ```
-tmux server "atmux"
+tmux server "aip"
 ├── window 0: orchestrator (any CLI agent)
 ├── window 1: coder (claude/gemini/aider/etc)
 ├── window 2: reviewer (any CLI agent)
@@ -79,7 +79,7 @@ The orchestrator's default loop is: read the event log, act on what's changed. P
 
 **Debugging**: `tmux attach` and watch agents think in real time.
 
-**Remote support**: SSH gives you everything. `ssh box "tmux capture-pane -pt atmux:coder"` reads a remote agent's output. Same primitives, different machine.
+**Remote support**: SSH gives you everything. `ssh box "tmux capture-pane -pt aip:coder"` reads a remote agent's output. Same primitives, different machine.
 
 ## The Output Problem (Solved)
 
@@ -95,9 +95,18 @@ The orchestrator's default loop is: read the event log, act on what's changed. P
 
 **Solution 5 — Push formatting inward**: every CLI agent supports some extensibility — MCP servers, custom tools, hooks, shell aliases. Install a tiny shim that formats output on the agent's side. The agent doesn't even know it's doing it. No external parser needed.
 
-## The MCP Server (atmux-mcp)
+## The MCP Server (aip-mcp)
 
-One MCP server, installed on every CLI agent. Replaces everything ACP was supposed to do.
+One MCP server, installed where needed. Coordination uses a three-tier hook system:
+
+- **Tier 1 — Native CLI hooks** (8 backends: claude-code, copilot, gemini, kiro, codex, opencode, cursor, qwen): zero overhead, zero agent awareness. Hook configs emit lifecycle telemetry directly.
+- **Tier 2 — aip-shim interactive intercept** (2 backends: amp, vibe/Mistral): watches tmux pane via regex, matches approval prompts, injects responses. No hook support needed from the CLI.
+- **Tier 3 — MCP fallback** (e.g. kilo): `report_status` and `report_progress` tools for any CLI without hooks or shim support. Highest token cost.
+
+Additional coordination features:
+- `elicit` parameter on `notify` for MCP elicitation (claude-code, codex, cursor, qwen)
+- `INJECTION_COMMANDS` for mid-stream messaging: claude-code (`/btw`), codex, copilot, gemini, cursor, qwen
+- `BACKEND_LAUNCH_COMMANDS` maps all 11 backends to their shell commands
 
 ### Tools
 
@@ -105,35 +114,31 @@ Every tool call automatically appends a one-line JSON event to `workspace/events
 
 ```
 report_status
-  - args: status (working | blocked | failed | finished | idle), message (optional)
-  - writes: workspace/status/{agent_name}.json
-  - appends: workspace/events.jsonl
-  - purpose: orchestrator polls status without reading full panes
+  - fallback status writer for hookless CLIs
 
 export_summary
-  - args: content (markdown string), task_id (optional)
-  - writes: workspace/summaries/{agent_name}-{timestamp}.md
-  - appends: workspace/events.jsonl
-  - purpose: concise output for other agents to reference
+  - persist markdown output for other agents
 
 register_capabilities
-  - args: capabilities (list of strings eg ["python", "rust", "testing"]), interests (optional, see Agent Interest Maps)
-  - writes: workspace/status/{agent_name}.json (merged with status)
-  - appends: workspace/events.jsonl
-  - purpose: orchestrator knows who can do what and what each agent cares about
+  - declare capabilities and interest maps
 
 request_task
-  - args: target_role (optional), task_description, context (optional), priority (optional)
-  - writes: workspace/tasks/pending/{task_id}.md
-  - appends: workspace/events.jsonl
-  - purpose: structured task delegation — agents can also self-serve from pending/
+  - create a pending task for delegation
 
 report_progress
-  - args: progress (string eg "3 of 5 files done"), percentage (optional)
-  - writes: workspace/status/{agent_name}.json (merged)
-  - appends: workspace/events.jsonl
-  - purpose: lightweight progress without full pane reads
+  - fallback progress writer for hookless CLIs
+
+wait_for
+  - block on matching event-log activity
+
+spawn_teammate
+  - create tmux-backed child agents with tree registration
+
+notify
+  - send agent-to-agent messages with event-log delivery and priority-aware injection
 ```
+
+The key change from the original design is selectivity: not every agent gets all 8 tools. `aip-mcp --tool-profile ...` trims the surface area by role, and hook-capable workers can avoid `report_status` and `report_progress` entirely.
 
 ### Event Log Format
 
@@ -148,19 +153,19 @@ report_progress
 
 The orchestrator reads the last N lines of this file and knows exactly what's happening across all agents. No pane reads, no polling status files individually. One file, one read.
 
-### That's it. Five tools. This IS your agent coordination protocol.
+### This is the coordination surface.
 
 ### Why Not ACP?
 
 ACP is a spec that everyone implements differently. You end up writing adapters per vendor — the exact same normalisation problem as parsing different CLI outputs, just moved from terminal formatting to protocol implementation.
 
-ATMUX sidesteps this entirely. You wrote the MCP server once, you install it everywhere, it behaves identically on every CLI. The agents don't need to know they're participating in a multi-agent system. They just have tools called `report_status` and `export_summary` and they use them naturally.
+agent-nexus sidesteps this entirely. You write the MCP server once, layer hooks on top where the CLI supports them, and expose only the tools the role actually needs. The agents don't need to know they're participating in a multi-agent system. They just see a small coordination surface and workspace files.
 
 If ACP ever stabilises, your MCP tools can emit ACP-compatible events as a translation layer. But you're not blocked waiting.
 
 ### Why Not SSE?
 
-SSE exists to stream events from a server to a client over HTTP. In ATMUX, live output is the tmux pane buffer — already streaming, already there. SSE is a transport layer you've made redundant.
+SSE exists to stream events from a server to a client over HTTP. In agent-nexus, live output is the tmux pane buffer — already streaming, already there. SSE is a transport layer you've made redundant.
 
 SSE is also what makes ACP implementations inconsistent — everyone handles connection lifecycle, reconnection, and event formatting differently. tmux handles all of it natively.
 
@@ -218,11 +223,11 @@ The orchestrator is an LLM reading panes. It doesn't need error codes or retry l
 
 ## IDE Agents
 
-IDE agents (Cursor, Windsurf, Cline, Copilot) become full team members by running their terminal work inside the ATMUX tmux session. One instruction: "use `tmux attach -t atmux:frontend` for your terminal."
+IDE agents (Cursor, Windsurf, Cline, Copilot) become full team members by running their terminal work inside the agent-nexus tmux session. One instruction: "use `tmux attach -t aip:frontend` for your terminal."
 
 Now the IDE agent shows up in `tmux list-windows`, the orchestrator reads its pane like any other agent, and it calls the same MCP tools. From the orchestrator's perspective, it's just another agent — it doesn't know or care that there's a GUI attached.
 
-The human developer in the IDE is also just an agent. Read your task from `workspace/tasks/`, do the work, call `report_status` when done. The orchestrator moves on. No special approval workflow — you're just a slow agent with good taste.
+The human developer in the IDE is also just an agent. Read your task from `workspace/tasks/`, do the work, update the workspace via hooks or MCP, and the orchestrator moves on. No special approval workflow — you're just a slow agent with good taste.
 
 ## Cloud Agents (Git Bridge)
 
@@ -240,7 +245,7 @@ Cloud agents like Jules can't access tmux but can access a git repo. Push the wo
 To bridge cloud agent activity back into the local event log, spawn a small watcher in its own tmux window:
 
 ```bash
-tmux new-window -t atmux -n github-watcher "./watch-prs.sh"
+tmux new-window -t aip -n github-watcher "./watch-prs.sh"
 ```
 
 The watcher polls GitHub (via `gh` CLI) for PRs and commits from cloud agents, then appends events to the local log:
@@ -259,18 +264,18 @@ They're contractors, not managed workers. The orchestrator can leave work for th
 
 ### Spawn
 ```bash
-tmux new-window -t atmux -n coder "claude-code"
+tmux new-window -t aip -n coder "claude-code"
 # or
-tmux new-window -t atmux -n coder "gemini --resume abc123"
+tmux new-window -t aip -n coder "gemini --resume abc123"
 ```
 
 ### Communicate (live)
 ```bash
 # orchestrator reads coder's latest output
-tmux capture-pane -pt atmux:coder
+tmux capture-pane -pt aip:coder
 
 # orchestrator sends task to coder
-tmux send-keys -t atmux:coder "implement the auth module" Enter
+tmux send-keys -t aip:coder "implement the auth module" Enter
 ```
 
 ### Communicate (async)
@@ -283,20 +288,20 @@ Just leave it. Idle CLI agents use minimal resources (~150-300MB RAM). The tmux 
 Every CLI supports native resume. The agent handles its own session persistence — you never need to serialise or restore context externally.
 ```bash
 # agent already running in pane — just send new input
-tmux send-keys -t atmux:coder "now add tests" Enter
+tmux send-keys -t aip:coder "now add tests" Enter
 
 # agent was killed — respawn with native resume
-tmux new-window -t atmux -n coder "gemini --resume session_abc123"
-tmux new-window -t atmux -n coder "claude-code --resume"
+tmux new-window -t aip -n coder "gemini --resume session_abc123"
+tmux new-window -t aip -n coder "claude-code --resume"
 ```
 
 ### Shutdown
 ```bash
 # agent exports its own summary via MCP tool (or orchestrator tells it to)
 # most CLIs also support /export or equivalent natively
-tmux send-keys -t atmux:coder "/export" Enter
+tmux send-keys -t aip:coder "/export" Enter
 # wait for file
-tmux kill-window -t atmux:coder
+tmux kill-window -t aip:coder
 ```
 
 Summary file remains in workspace for other agents to reference. Native session ID is tracked so the agent can be resumed later.
@@ -316,7 +321,7 @@ The orchestrator is just another CLI agent in window 0. No special framework. It
 
 **Critical token rule**: the orchestrator never pastes another agent's output into a task. It references files. Instead of "here's what the architect wrote: [500 tokens]", it sends "implement the auth module per the design in `workspace/summaries/architect-0317.md`". The agent reads the file directly. The orchestrator's context stays clean and small.
 
-The orchestrator can be ANY CLI agent. Claude, Gemini, Kimi, aider. Swap mid-session if needed — the new orchestrator reads workspace state and continues.
+The orchestrator can be ANY CLI agent. Claude Code, Copilot, Gemini, Codex, Cursor, Qwen, or any of the 11 supported backends. Swap mid-session if needed — the new orchestrator reads workspace state and continues.
 
 ## Agent Interest Maps
 
@@ -443,16 +448,16 @@ Compare this to "every agent reads every pane" which could easily be 5000+ token
 
 1. Install the agent CLI
 2. Install the shared MCP server on it
-3. `tmux new-window -t atmux -n name "agent-cli"`
+3. `tmux new-window -t aip -n name "agent-cli"`
 4. Done
 
 No adapter code. No parser. No protocol integration. The MCP server gives it the status/export tools. tmux gives it connectivity to every other agent.
 
 ## What This Replaces
 
-| Traditional approach | ATMUX equivalent |
+| Traditional approach | agent-nexus equivalent |
 |---|---|
-| ACP protocol | 5 MCP tools |
+| ACP protocol | Selective MCP tools + hooks |
 | SSE streaming | tmux pane buffer |
 | Message broker | tmux server (shared memory) |
 | Service discovery | `tmux list-windows` |
@@ -492,8 +497,8 @@ The whole point is to minimise token burn. Agents should almost never read raw p
 | 1 | `tail -n 20 workspace/events.jsonl` | ~50 tokens | Always check first — what happened? |
 | 2 | `cat workspace/status/coder.json` | ~20 tokens | Who's doing what right now? |
 | 3 | `cat workspace/summaries/coder-0317.md` | ~100 tokens | What did they produce? |
-| 4 | `tmux capture-pane -pt atmux:coder -S -5` | ~30 tokens | Quick peek at live output (last 5 lines) |
-| 5 | `tmux capture-pane -pt atmux:coder -S -20` | ~100 tokens | Need more context — expand progressively |
+| 4 | `tmux capture-pane -pt aip:coder -S -5` | ~30 tokens | Quick peek at live output (last 5 lines) |
+| 5 | `tmux capture-pane -pt aip:coder -S -20` | ~100 tokens | Need more context — expand progressively |
 | 6 | Full pane read | ~1000+ tokens | Almost never needed |
 
 ### Progressive Reverse Reading
@@ -502,13 +507,13 @@ The whole point is to minimise token burn. Agents should almost never read raw p
 
 ```bash
 # last 5 lines — usually enough
-tmux capture-pane -pt atmux:coder -S -5
+tmux capture-pane -pt aip:coder -S -5
 
 # need more? last 20
-tmux capture-pane -pt atmux:coder -S -20
+tmux capture-pane -pt aip:coder -S -20
 
 # need more? last 50, but stop at the marker
-tmux capture-pane -pt atmux:coder -S -50
+tmux capture-pane -pt aip:coder -S -50
 ```
 
 Combined with the marker system, the agent reads backwards until it hits the marker and stops. It never reads thinking tokens. The output section might be 10 lines while the thinking was 200 — progressive reverse reading means you only pay for the 10.
@@ -521,9 +526,9 @@ The MCP server is the token-efficient layer. That's what it was designed for.
 
 ## ACP/A2A Compatibility
 
-ATMUX doesn't depend on ACP or A2A, but the MCP tools map cleanly to both:
+agent-nexus doesn't depend on ACP or A2A, but the MCP tools map cleanly to both:
 
-| ATMUX MCP tool | ACP equivalent | A2A equivalent |
+| agent-nexus MCP tool | ACP equivalent | A2A equivalent |
 |---|---|---|
 | `report_status` | Task status events | Task status updates |
 | `register_capabilities` | Agent description | Agent Card |
@@ -531,11 +536,11 @@ ATMUX doesn't depend on ACP or A2A, but the MCP tools map cleanly to both:
 | `export_summary` | Task artifact | Task artifact |
 | `report_progress` | Progress events | Progress updates |
 
-If the ecosystem converges, add a flag: `ATMUX_ACP_COMPAT=true`. The MCP tools then also emit ACP-formatted events alongside the file writes. Compatibility without coupling — build it later if needed.
+If the ecosystem converges, add a flag: `ANEX_ACP_COMPAT=true`. The MCP tools then also emit ACP-formatted events alongside the file writes. Compatibility without coupling — build it later if needed.
 
 ## Implementation Notes
 
-**ANSI stripping**: CLI tools output heavy escape sequences — colours, spinners, cursor movement. When reading panes, pipe through a cleaner so agents aren't confused by raw escape codes in their context window. Example: `tmux capture-pane -pt atmux:coder | sed 's/\x1b\[[0-9;]*m//g'` or use `ansifilter`. Alternatively, use `tmux capture-pane -p -t atmux:coder` without `-e` to get plain text (tmux strips escapes by default when `-e` is omitted).
+**ANSI stripping**: CLI tools output heavy escape sequences — colours, spinners, cursor movement. When reading panes, pipe through a cleaner so agents aren't confused by raw escape codes in their context window. Example: `tmux capture-pane -pt aip:coder | sed 's/\x1b\[[0-9;]*m//g'` or use `ansifilter`. Alternatively, use `tmux capture-pane -p -t aip:coder` without `-e` to get plain text (tmux strips escapes by default when `-e` is omitted).
 
 **Atomic file writes**: the MCP server should write status files via write-to-tmp-then-rename, not direct writes. This ensures the orchestrator never reads a half-written JSON object. Example: write to `workspace/status/coder.json.tmp`, then `mv` to `workspace/status/coder.json`. Rename is atomic on all Unix filesystems.
 
@@ -544,12 +549,12 @@ If the ecosystem converges, add a flag: `ATMUX_ACP_COMPAT=true`. The MCP tools t
 ## Phase 1: Test Plan
 
 ### Step 1 — Basic tmux orchestration
-- Start a tmux server named `atmux`
+- Start a tmux server named `aip`
 - Spawn two CLI agents in named windows
 - Orchestrator in window 0 reads the other panes
 - Verify agents can see each other's output
 
-### Step 2 — MCP server (atmux-mcp)
+### Step 2 — MCP server (aip-mcp)
 - Build the 5-tool MCP server
 - Install on two different CLI agents
 - Verify status reporting and summary export work
@@ -581,7 +586,7 @@ If the ecosystem converges, add a flag: `ATMUX_ACP_COMPAT=true`. The MCP tools t
 
 ### Step 7 — Remote agents
 - Repeat steps 1-3 with one agent on a remote machine via SSH
-- Verify `ssh box "tmux capture-pane -pt atmux:coder"` works transparently
+- Verify `ssh box "tmux capture-pane -pt aip:coder"` works transparently
 
 ### Step 8 — Cloud agents (optional)
 - Push workspace to a GitHub repo

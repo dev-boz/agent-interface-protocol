@@ -23,3 +23,11 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Workspace test artifacts
+workspace_test/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

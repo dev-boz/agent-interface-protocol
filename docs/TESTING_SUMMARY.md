@@ -1,38 +1,44 @@
-# ATMUX Testing Summary
+# agent-nexus Testing Summary
 
-**Date**: 2026-03-18
-**Status**: ✅ All core functionality verified
+**Date**: 2026-03-30
+**Status**: ✅ Current suite passing; hooks, selective MCP profiles, aip-shim, and all 11 backends verified
 
 ## Test Results
 
-### Unit Tests
+### Current Suite
 ```
-21/21 tests passing (0.38s)
+194 tests passing
 ```
 
 **Coverage:**
 - `workspace.py` - Layout creation, status merge, events, summaries
-- `tasks.py` - Full lifecycle, claim errors, lease expiry, listing
+- `tasks.py` - Full lifecycle, claim errors, lease expiry, listing, blocked_by task dependencies
 - `tmux.py` - Command generation (FakeRunner, no real tmux needed)
-- `mcp_server.py` - Message encoding, initialize/list, tool calls, validation
-- `cli.py` - Init command with workspace creation
+- `mcp_server.py` - Message encoding, initialize/list, tool calls, profiles, validation, notify elicit parameter, blocked_by in request_task
+- `hooks.py` - Hook normalization, stdin parsing, workspace writes
+- `hook_configs.py` - Config generation and install/merge helpers (claude-code, copilot, gemini, kiro, codex, opencode, cursor, qwen)
+- `cli.py` - Init, hook proxy/config/install flows, agent lifecycle commands
+- `aip_shim.py` - Tier 2 interactive intercept shim for vibe and amp backends
+- `test_all_backends.py` - 66 tests: registry completeness, per-backend hook configs, shim profiles, MCP runtime, task lifecycle for all 11 backends
+- `test_multi_backend_collab.py` - 8 tests: workspace init, hook config generation, MCP runtime, task distribution, dependency chains, cross-agent notify, shim profiles
 
 ### Integration Tests
 
 #### 1. MCP Server Live Test ✅
 **File**: `test_mcp_live.py`
 
-Verified all 5 MCP tools via stdio JSON-RPC:
+Verified the MCP tool surface via stdio JSON-RPC:
 - ✅ `initialize` handshake
-- ✅ `tools/list` returns 5 tools
+- ✅ `tools/list` returns the expected tools for the active profile
 - ✅ `report_status` writes status file + event
 - ✅ `register_capabilities` with interest maps
 - ✅ `report_progress` updates status
 - ✅ `export_summary` creates markdown file
 - ✅ `request_task` creates pending task
+- ✅ `wait_for`, `spawn_teammate`, and `notify` are covered elsewhere in the suite
 
 **Artifacts verified:**
-- `workspace/events.jsonl` - 5 events logged
+- `workspace/events.jsonl` - expected events logged
 - `workspace/status/test-agent.json` - merged status with all fields
 - `workspace/summaries/test-agent-*.md` - summary exported
 - `workspace/tasks/pending/task-001.md` - task created
@@ -180,14 +186,14 @@ Simulated orchestrator crash mid-workflow:
 | Service discovery | `list-windows` | ✅ |
 | Session persistence | tmux sessions | ✅ |
 | Task queue | Filesystem + atomic `mv` | ✅ |
-| Coordination protocol | 5 MCP tools | ✅ |
+| Coordination protocol | Selective MCP tools + hooks | ✅ |
 | Fault tolerance | Workspace + event log | ✅ |
 
-## What ATMUX Replaces
+## What agent-nexus Replaces
 
-| Traditional | ATMUX | Status |
+| Traditional | agent-nexus | Status |
 |-------------|-------|--------|
-| ACP protocol | 5 MCP tools | ✅ Verified |
+| ACP protocol | Selective MCP tools + hooks | ✅ Verified |
 | SSE streaming | tmux pane buffer | ✅ Verified |
 | Message broker | tmux server | ✅ Verified |
 | Service discovery | `tmux list-windows` | ✅ Verified |
@@ -208,9 +214,31 @@ Simulated orchestrator crash mid-workflow:
 3. **Model fallback** - Orchestrator reading quota errors and spawning fallback agents
 4. **ANSI escape handling** - Heavy escape sequences in CLI output (mitigated by `capture-pane` without `-e`)
 
+### Now Implemented (previously limitations)
+- ✅ **blocked_by task dependencies** - Tasks can declare dependencies; tested in task queue and MCP runtime
+- ✅ **notify elicit parameter** - Notify tool supports elicit for interactive prompts
+- ✅ **aip-shim intercept** - Tier 2 backends (vibe, amp) supported via interactive intercept shim
+- ✅ **cursor/qwen hook configs** - Hook config generation verified for cursor and qwen backends
+- ✅ **All 11 backends** - Full registry completeness and per-backend lifecycle verified
+
 ### Backend Compatibility
-Tested with bash only. Real-world usage requires:
-- CLI agents with headless mode (gemini, copilot, cursor, amp, mistral)
+All 11 backends have hook config generation and MCP runtime verified in automated tests:
+
+| Backend | CLI Name | Tier | Hook Config Path |
+|---------|----------|------|-----------------|
+| Claude Code | claude-code | Tier 1 | .claude/settings.json |
+| Copilot | copilot | Tier 1 | .github/copilot/hooks.json |
+| Gemini | gemini | Tier 1 | .gemini/settings.json |
+| Kiro | kiro | Tier 1 | .kiro/agents/{name}.json |
+| Codex | codex | Tier 1 | .codex/hooks.json + config.toml |
+| OpenCode | opencode | Tier 1 | Plugin events |
+| Cursor | cursor | Tier 1 | .cursor/settings.json |
+| Qwen | qwen | Tier 1 | .qwen/settings.json |
+| Kilo | kilo | Tier 1 (native) | Plugin events (opencode fork) |
+| Vibe (Mistral) | vibe | Tier 2 | aip-shim intercept |
+| Amp | amp | Tier 2 | aip-shim intercept |
+
+Real-world usage still requires:
 - MCP server installation per agent
 - Native resume support per CLI
 
@@ -232,14 +260,14 @@ Tested with bash only. Real-world usage requires:
 
 ### Documentation
 ✅ **Complete:**
-- Architecture doc (`atmux.md`)
+- Architecture doc (`agent-nexus.md`)
 - CLI reference (`README.md`)
 - MCP server reference (`README.md`)
-- Test suite (5 integration tests)
+- Test suite (5 integration tests + comprehensive unit/backend tests)
 
 ## Conclusion
 
-ATMUX successfully demonstrates that multi-agent orchestration can be built on Unix primitives (tmux + filesystem) with zero infrastructure. The core insight holds: **AI agents are Unix processes, and Unix already solved process orchestration.**
+agent-nexus successfully demonstrates that multi-agent orchestration can be built on Unix primitives (tmux + filesystem) with zero infrastructure. The core insight holds: **AI agents are Unix processes, and Unix already solved process orchestration.**
 
 **Key achievements:**
 - ✅ Zero servers, zero brokers, zero frameworks

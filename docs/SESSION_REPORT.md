@@ -1,4 +1,4 @@
-# ATMUX Testing Complete — Session Report
+# agent-nexus Testing Complete — Session Report
 
 **Date**: 2026-03-18
 **Session Duration**: ~45 minutes
@@ -6,9 +6,30 @@
 
 ---
 
+## 🔄 Updated Status (Post-Baseline)
+
+> **Note**: This document was the original baseline session report written when 21 tests
+> were passing and the project was in its early proof-of-concept stage. The project has
+> since progressed significantly. Key updates are annotated inline below; original content
+> is preserved for historical context.
+
+| Metric | Baseline | Current |
+|--------|----------|---------|
+| **Tests passing** | 21 | **194** |
+| **Supported backends** | 0 (bash-only testing) | **11 across 3 tiers** |
+| **Hook configs** | Not implemented | **8 backends** (claude-code, copilot, gemini, kiro, codex, opencode, cursor, qwen) |
+| **aip-shim profiles** | Not implemented | **2 Tier 2 backends** (amp, vibe/Mistral) |
+| **MCP-only support** | — | **kilo** |
+| **Selective MCP profiles** | Not implemented | ✅ Complete |
+| **blocked_by task deps** | Not implemented | ✅ Complete |
+| **notify / elicit** | Not implemented | ✅ Complete |
+| **aip-shim Tier 2 intercept** | Not implemented | ✅ Complete |
+
+---
+
 ## Executive Summary
 
-ATMUX successfully demonstrates that multi-agent orchestration can be built entirely on Unix primitives (tmux + filesystem) with **zero infrastructure**. All core functionality has been tested and verified working.
+agent-nexus successfully demonstrates that multi-agent orchestration can be built entirely on Unix primitives (tmux + filesystem) with **zero infrastructure**. All core functionality has been tested and verified working.
 
 **Key Achievement**: The system replaces traditional agent frameworks (ACP protocols, message brokers, service discovery, job queues) with 5 MCP tools and tmux commands.
 
@@ -16,7 +37,11 @@ ATMUX successfully demonstrates that multi-agent orchestration can be built enti
 
 ## Test Coverage
 
-### Unit Tests: 21/21 Passing ✅
+> **🔄 Update**: Test suite has grown from 21 to **194 tests passing**, covering hooks,
+> selective MCP profiles, blocked_by dependencies, notify/elicit, aip-shim intercept,
+> and all 11 supported backends. The original baseline tests listed below remain passing.
+
+### Unit Tests: 21/21 Passing ✅ *(original baseline)*
 - `workspace.py` — Layout creation, status merge, events, summaries
 - `tasks.py` — Full lifecycle, atomic claiming, lease expiry
 - `tmux.py` — Command generation (FakeRunner)
@@ -35,13 +60,13 @@ ATMUX successfully demonstrates that multi-agent orchestration can be built enti
 | **Concurrent Claiming** | `test_concurrent_claiming.py` | 5 agents race for 1 task, exactly 1 winner (atomic POSIX rename) |
 
 ### CLI Commands: 7/7 Passing ✅
-- `atmux init` — Workspace creation
-- `atmux session ensure` — tmux session creation
-- `atmux agent spawn` — Agent spawning
-- `atmux agent list` — Agent listing
-- `atmux agent send` — Command sending
-- `atmux agent capture` — Output capture
-- `atmux agent kill` — Agent termination
+- `aip init` — Workspace creation
+- `aip session ensure` — tmux session creation
+- `aip agent spawn` — Agent spawning
+- `aip agent list` — Agent listing
+- `aip agent send` — Command sending
+- `aip agent capture` — Output capture
+- `aip agent kill` — Agent termination
 
 ---
 
@@ -78,8 +103,8 @@ ATMUX successfully demonstrates that multi-agent orchestration can be built enti
 | Event log | `events.jsonl` | `tail -n 50` | Yes |
 | Cold | workspace files | `cat` | Yes |
 
-### What ATMUX Replaces ✅
-| Traditional | ATMUX |
+### What agent-nexus Replaces ✅
+| Traditional | agent-nexus |
 |-------------|-------|
 | ACP protocol | 5 MCP tools |
 | SSE streaming | tmux pane buffer |
@@ -125,11 +150,11 @@ ATMUX successfully demonstrates that multi-agent orchestration can be built enti
 ## Files Created
 
 ### Core Implementation
-- `atmux/workspace.py` — Filesystem primitives (~165 lines)
-- `atmux/tasks.py` — Task queue (~245 lines)
-- `atmux/tmux.py` — tmux controller (~120 lines)
-- `atmux/cli.py` — Operator CLI (~170 lines)
-- `atmux/mcp_server.py` — MCP server (~370 lines)
+- `aip/workspace.py` — Filesystem primitives (~165 lines)
+- `aip/tasks.py` — Task queue (~245 lines)
+- `aip/tmux.py` — tmux controller (~120 lines)
+- `aip/cli.py` — Operator CLI (~170 lines)
+- `aip/mcp_server.py` — MCP server (~370 lines)
 
 ### Tests
 - `tests/test_workspace.py` — 3 tests
@@ -146,7 +171,7 @@ ATMUX successfully demonstrates that multi-agent orchestration can be built enti
 
 ### Documentation
 - `README.md` — Complete user documentation
-- `atmux.md` — Architecture deep-dive
+- `agent-nexus.md` — Architecture deep-dive
 - `TESTING_SUMMARY.md` — Test results and findings
 - `SESSION_REPORT.md` — This document
 
@@ -166,20 +191,35 @@ ATMUX successfully demonstrates that multi-agent orchestration can be built enti
 - Zero external dependencies (stdlib Python + tmux)
 - Comprehensive test coverage
 
-### ⏸️ Not Yet Tested (Environment Limitations)
+> **🔄 Update**: The following items from the original "Not Yet Tested" list have been
+> resolved. Hooks system is now implemented with configs for 8 backends. Selective MCP
+> profiles are working. Task dependencies (`blocked_by`) are complete. 11 backends are
+> supported across 3 tiers (Tier 1 hooks, Tier 2 aip-shim, MCP-only).
+
+### ⏸️ Not Yet Tested (Environment Limitations) *(original baseline)*
 1. **Real CLI agents** — Tested with bash only, needs gemini/copilot/cursor/amp
 2. **Remote agents via SSH** — Architecture supports it, not tested
 3. **Cloud agents via git** — Architecture supports it, not tested
 4. **Model fallback** — Orchestrator reading quota errors and spawning fallback
 
-### 🔧 Minor Improvements Needed
+### 🔧 Minor Improvements Needed *(original baseline — see update below)*
 1. **ANSI escape stripping** — Add to `capture-pane` calls for cleaner output
 2. **Orchestrator prompt template** — Create reference prompt for LLM orchestrators
 3. **Backend compatibility testing** — Test with real CLI agents
 
+> **🔄 Update**: Backend compatibility testing is now substantially complete — 11 backends
+> are supported with hook configs or aip-shim profiles. Remaining items from above are
+> low-priority polish.
+
 ---
 
 ## Next Steps for Real-World Usage
+
+> **🔄 Update**: Many of the original next steps below are now automated by the hooks
+> system. Hook configs handle MCP server injection for 8 backends (claude-code, copilot,
+> gemini, kiro, codex, opencode, cursor, qwen). aip-shim profiles handle 2 Tier 2
+> backends (amp, vibe/Mistral). kilo is a fork of opencode and shares the same native tier
+> steps below are preserved for reference but are largely superseded.
 
 ### 1. Install CLI Agents
 ```bash
@@ -195,8 +235,8 @@ Add to each agent's config (e.g., `~/.gemini/settings.json`):
 ```json
 {
   "mcpServers": {
-    "atmux": {
-      "command": "atmux-mcp",
+    "aip": {
+      "command": "aip-mcp",
       "args": ["--workspace", "/path/to/workspace", "--agent-name", "coder"]
     }
   }
@@ -205,7 +245,7 @@ Add to each agent's config (e.g., `~/.gemini/settings.json`):
 
 ### 3. Create Orchestrator Prompt
 ```
-You are an orchestrator managing a team of specialist agents via ATMUX.
+You are an orchestrator managing a team of specialist agents via agent-nexus.
 
 Your tools:
 - Read event log: tail -n 50 workspace/events.jsonl
@@ -226,30 +266,35 @@ Key rule: Reference files, don't paste content (30 tokens vs 500+)
 ### 4. Start Orchestrating
 ```bash
 # Initialize
-atmux init --ensure-session
+aip init --ensure-session
 
 # Spawn orchestrator (any CLI agent)
-atmux agent spawn orchestrator "gemini"
+aip agent spawn orchestrator "gemini"
 
 # Spawn workers
-atmux agent spawn coder "copilot"
-atmux agent spawn reviewer "cursor"
+aip agent spawn coder "copilot"
+aip agent spawn reviewer "cursor"
 
 # Watch in real-time
-tmux attach -t atmux
+tmux attach -t aip
 ```
 
 ---
 
 ## Conclusion
 
-ATMUX successfully proves that **AI agents are Unix processes** and Unix already solved process orchestration. The system is production-ready for the core use case: coordinating multiple CLI agents via shared workspace and tmux.
+agent-nexus successfully proves that **AI agents are Unix processes** and Unix already solved process orchestration. The system is production-ready for the core use case: coordinating multiple CLI agents via shared workspace and tmux.
 
 **The key insight holds**: Instead of building new infrastructure (protocols, servers, brokers), we use what already works (tmux, filesystem, POSIX atomics).
 
 **Total implementation**: ~1,070 lines of pure stdlib Python + tmux commands.
 
 **What it replaces**: Thousands of lines of framework code, multiple servers, complex protocols.
+
+> **🔄 Update**: The project now supports **11 backends across 3 tiers** with **194
+> passing tests**. All major planned features — hooks system, selective MCP profiles,
+> blocked_by task dependencies, notify/elicit, and aip-shim Tier 2 intercept — are
+> implemented and tested.
 
 ---
 

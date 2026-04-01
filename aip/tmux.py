@@ -25,7 +25,7 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class TmuxController:
-    def __init__(self, session_name: str = "atmux", runner: Runner | None = None) -> None:
+    def __init__(self, session_name: str = "aip", runner: Runner | None = None) -> None:
         self.session_name = session_name
         self.runner = runner or subprocess.run
 

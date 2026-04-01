@@ -9,9 +9,9 @@ import time
 from pathlib import Path
 
 def run_atmux(args):
-    """Run atmux command and return parsed JSON output."""
+    """Run aip command and return parsed JSON output."""
     result = subprocess.run(
-        ["python3", "-m", "atmux"] + args,
+        ["python3", "-m", "aip"] + args,
         capture_output=True,
         text=True,
         check=True
@@ -20,7 +20,7 @@ def run_atmux(args):
 
 def main():
     print("=" * 60)
-    print("ATMUX Test: Agent Lifecycle Management")
+    print("agent-interface-protocol Test: Agent Lifecycle Management")
     print("=" * 60)
 
     # Phase 1: Spawn agent and verify it's running
@@ -43,7 +43,7 @@ def main():
     time.sleep(0.5)
 
     result = subprocess.run(
-        ["python3", "-m", "atmux", "agent", "capture", "lifecycle-test", "--lines", "3"],
+        ["python3", "-m", "aip", "agent", "capture", "lifecycle-test", "--lines", "3"],
         capture_output=True,
         text=True,
         check=True
@@ -79,7 +79,7 @@ def main():
     print("-" * 60)
 
     # In real usage, this would be something like:
-    # atmux agent spawn lifecycle-test "gemini --resume session-abc123"
+    # aip agent spawn lifecycle-test "gemini --resume session-abc123"
     # For this test, we just respawn with bash and verify the pattern works
 
     result = run_atmux(["agent", "spawn", "lifecycle-test-resumed", "bash"])
@@ -90,7 +90,7 @@ def main():
     time.sleep(0.5)
 
     result = subprocess.run(
-        ["python3", "-m", "atmux", "agent", "capture", "lifecycle-test-resumed", "--lines", "3"],
+        ["python3", "-m", "aip", "agent", "capture", "lifecycle-test-resumed", "--lines", "3"],
         capture_output=True,
         text=True,
         check=True

@@ -30,7 +30,7 @@ def send_request(proc, method, params=None, msg_id=1):
 def main():
     # Start MCP server
     proc = subprocess.Popen(
-        ["atmux-mcp", "--workspace", "workspace", "--agent-name", "test-agent"],
+        ["aip-mcp", "--workspace", "workspace", "--agent-name", "test-agent"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -46,7 +46,7 @@ def main():
             "capabilities": {},
             "clientInfo": {"name": "test", "version": "1.0"}
         })
-        assert resp["result"]["serverInfo"]["name"] == "atmux-mcp"
+        assert resp["result"]["serverInfo"]["name"] == "aip-mcp"
         print("   ✓ Initialize successful")
 
         # 2. List tools

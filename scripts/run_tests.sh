@@ -1,11 +1,11 @@
 #!/bin/bash
-# ATMUX Test Runner
+# agent-nexus Test Runner
 # Runs all unit and integration tests
 
 set -e
 
 echo "============================================================"
-echo "ATMUX Test Suite"
+echo "agent-nexus Test Suite"
 echo "============================================================"
 echo ""
 
@@ -38,7 +38,7 @@ run_test() {
     fi
 }
 
-# Change to atmux root directory
+# Change to aip root directory
 cd "$(dirname "$0")/.."
 
 echo "Phase 1: Unit Tests"
@@ -54,7 +54,7 @@ rm -rf workspace
 mkdir -p workspace
 
 # Ensure tmux session exists
-python -m atmux init --ensure-session > /dev/null 2>&1 || true
+python -m aip init --ensure-session > /dev/null 2>&1 || true
 
 run_test "MCP server live test" "python tests/integration/test_mcp_live.py"
 run_test "Task lease expiry test" "python tests/integration/test_lease_expiry.py"
@@ -66,17 +66,17 @@ echo ""
 echo "Phase 3: CLI Commands"
 echo "------------------------------------------------------------"
 
-run_test "atmux init" "python -m atmux --workspace-root /tmp/atmux-test-cli init"
-run_test "atmux session ensure" "python -m atmux --workspace-root /tmp/atmux-test-cli --session-name atmux-test-cli session ensure"
-run_test "atmux agent spawn" "python -m atmux --session-name atmux-test-cli agent spawn test-cli-agent 'bash'"
-run_test "atmux agent list" "python -m atmux --session-name atmux-test-cli agent list"
-run_test "atmux agent send" "python -m atmux --session-name atmux-test-cli agent send test-cli-agent 'echo test'"
-run_test "atmux agent capture" "python -m atmux --session-name atmux-test-cli agent capture test-cli-agent --lines 5"
-run_test "atmux agent kill" "python -m atmux --session-name atmux-test-cli agent kill test-cli-agent"
+run_test "aip init" "python -m aip --workspace-root /tmp/anex-test-cli init"
+run_test "aip session ensure" "python -m aip --workspace-root /tmp/anex-test-cli --session-name anex-test-cli session ensure"
+run_test "aip agent spawn" "python -m aip --session-name anex-test-cli agent spawn test-cli-agent 'bash'"
+run_test "aip agent list" "python -m aip --session-name anex-test-cli agent list"
+run_test "aip agent send" "python -m aip --session-name anex-test-cli agent send test-cli-agent 'echo test'"
+run_test "aip agent capture" "python -m aip --session-name anex-test-cli agent capture test-cli-agent --lines 5"
+run_test "aip agent kill" "python -m aip --session-name anex-test-cli agent kill test-cli-agent"
 
 # Cleanup CLI test session
-tmux kill-session -t atmux-test-cli 2>/dev/null || true
-rm -rf /tmp/atmux-test-cli
+tmux kill-session -t anex-test-cli 2>/dev/null || true
+rm -rf /tmp/anex-test-cli
 
 echo ""
 echo "============================================================"

@@ -5,9 +5,13 @@ import json
 import sys
 from dataclasses import asdict
 
+from .aip_shim import AipShim, BlockRule, load_profile
+from .hook_configs import generate_hook_config, install_hook_config
+from .hooks import HookRuntime, parse_hook_payload
+from .hooks import parse_codex_notification, parse_hook_stdin
 from .tasks import TaskQueue
 from .tmux import TmuxController, TmuxError
-from .workspace import AtmuxWorkspace, isoformat_z, utc_now
+from .workspace import AipWorkspace, isoformat_z, utc_now
 
 
 def _build_handoff_summary(agent_name: str, claimed_tasks: list, pane_output: str, reason: str) -> str:
@@ -24,7 +28,7 @@ def _build_handoff_summary(agent_name: str, claimed_tasks: list, pane_output: st
 
 
 def shutdown_agent_tree(
-    workspace: AtmuxWorkspace,
+    workspace: AipWorkspace,
     queue: TaskQueue,
     tmux: TmuxController,
     target: str,
@@ -100,9 +104,9 @@ def shutdown_agent_tree(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="atmux")
+    parser = argparse.ArgumentParser(prog="aip")
     parser.add_argument("--workspace-root", default="workspace")
-    parser.add_argument("--session-name", default="atmux")
+    parser.add_argument("--session-name", default="aip")
 
     subparsers = parser.add_subparsers(dest="command_group", required=True)
 
@@ -145,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     task_list = task_subparsers.add_parser("list")
     task_list.add_argument("--stage", default="pending")
+    task_list.add_argument("--claimable", action="store_true",
+                           help="Only show tasks with no unresolved blocked_by dependencies")
 
     reclaim_parser = task_subparsers.add_parser("reclaim-expired")
     reclaim_parser.add_argument("--json", action="store_true")
@@ -162,12 +168,61 @@ def build_parser() -> argparse.ArgumentParser:
     fail_parser.add_argument("task_id")
     fail_parser.add_argument("--agent-name")
 
+    hook_parser = subparsers.add_parser("hook")
+    hook_subparsers = hook_parser.add_subparsers(dest="hook_command", required=True)
+
+    hook_emit = hook_subparsers.add_parser("emit")
+    hook_emit.add_argument("--agent-name", required=True)
+    hook_emit.add_argument("--event", required=True)
+    hook_emit.add_argument("--payload-json")
+    hook_emit.add_argument("--payload-file")
+
+    hook_proxy = hook_subparsers.add_parser("proxy")
+    hook_proxy.add_argument("--agent-name", required=True)
+    hook_proxy.add_argument("--output-mode", choices=("silent", "json-empty"), default="silent")
+
+    hook_notify_proxy = hook_subparsers.add_parser("notify-proxy")
+    hook_notify_proxy.add_argument("--agent-name", required=True)
+    hook_notify_proxy.add_argument("notification_json", nargs="?")
+
+    hook_print_config = hook_subparsers.add_parser("print-config")
+    hook_print_config.add_argument("--cli", required=True, choices=("gemini", "kiro", "codex", "claude-code", "copilot", "cursor", "qwen"))
+    hook_print_config.add_argument("--agent-name", required=True)
+    hook_print_config.add_argument("--tool-profile", default="worker")
+
+    hook_install = hook_subparsers.add_parser("install")
+    hook_install.add_argument("--cli", required=True, choices=("gemini", "kiro", "codex", "claude-code", "copilot", "cursor", "qwen"))
+    hook_install.add_argument("--agent-name", required=True)
+    hook_install.add_argument("--tool-profile", default="worker")
+    hook_install.add_argument("--config-root", default=".")
+
+    shim_parser = subparsers.add_parser("shim")
+    shim_subparsers = shim_parser.add_subparsers(dest="shim_command", required=True)
+
+    shim_watch = shim_subparsers.add_parser("watch")
+    shim_watch.add_argument("agent_name")
+    shim_watch.add_argument("--cli", required=True)
+    shim_watch.add_argument("--profiles-dir")
+    shim_watch.add_argument("--auto-approve", action="store_true", default=True)
+    shim_watch.add_argument("--no-auto-approve", dest="auto_approve", action="store_false")
+    shim_watch.add_argument("--poll-interval", type=float, default=0.3)
+    shim_watch.add_argument("--max-iterations", type=int)
+
+    shim_check = shim_subparsers.add_parser("check")
+    shim_check.add_argument("agent_name")
+    shim_check.add_argument("--cli", required=True)
+    shim_check.add_argument("--profiles-dir")
+    shim_check.add_argument("--auto-approve", action="store_true", default=True)
+    shim_check.add_argument("--no-auto-approve", dest="auto_approve", action="store_false")
+
+    shim_list_profiles = shim_subparsers.add_parser("list-profiles")
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    workspace = AtmuxWorkspace(args.workspace_root)
+    workspace = AipWorkspace(args.workspace_root)
     queue = TaskQueue(workspace)
     tmux = TmuxController(session_name=args.session_name)
 
@@ -228,7 +283,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command_group == "task":
         if args.task_command == "list":
-            tasks = [asdict(task) for task in queue.list_tasks(stage=args.stage)]
+            if args.claimable:
+                tasks = [asdict(task) for task in queue.list_claimable_tasks()]
+            else:
+                tasks = [asdict(task) for task in queue.list_tasks(stage=args.stage)]
             print(json.dumps(tasks, indent=2))
             return 0
         if args.task_command == "reclaim-expired":
@@ -251,6 +309,95 @@ def main(argv: list[str] | None = None) -> int:
         if args.task_command == "fail":
             task = queue.fail_task(args.task_id, agent_name=args.agent_name)
             print(json.dumps(asdict(task), indent=2))
+            return 0
+
+    if args.command_group == "hook" and args.hook_command == "emit":
+        runtime = HookRuntime(args.workspace_root, args.agent_name)
+        payload = parse_hook_payload(args.payload_json, args.payload_file)
+        result = runtime.emit(args.event, payload)
+        print(json.dumps(result, indent=2))
+        return 0
+
+    if args.command_group == "hook" and args.hook_command == "proxy":
+        runtime = HookRuntime(args.workspace_root, args.agent_name)
+        event_name, payload = parse_hook_stdin(sys.stdin.read())
+        runtime.emit(event_name, payload)
+        if args.output_mode == "json-empty":
+            sys.stdout.write("{}\n")
+        return 0
+
+    if args.command_group == "hook" and args.hook_command == "notify-proxy":
+        runtime = HookRuntime(args.workspace_root, args.agent_name)
+        notification_text = args.notification_json if args.notification_json is not None else sys.stdin.read()
+        event_name, payload = parse_codex_notification(notification_text)
+        if event_name is not None:
+            runtime.emit(event_name, payload)
+            print(json.dumps({"handled": True, "event": event_name}))
+        else:
+            print(json.dumps({"handled": False, "reason": "notification type not mapped to hook runtime"}))
+        return 0
+
+    if args.command_group == "hook" and args.hook_command == "print-config":
+        config = generate_hook_config(
+            cli_name=args.cli,
+            workspace_root=args.workspace_root,
+            agent_name=args.agent_name,
+            session_name=args.session_name,
+            tool_profile=args.tool_profile,
+        )
+        print(json.dumps(config, indent=2))
+        return 0
+
+    if args.command_group == "hook" and args.hook_command == "install":
+        result = install_hook_config(
+            cli_name=args.cli,
+            config_root=args.config_root,
+            workspace_root=args.workspace_root,
+            agent_name=args.agent_name,
+            session_name=args.session_name,
+            tool_profile=args.tool_profile,
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+
+    if args.command_group == "shim":
+        if args.shim_command == "list-profiles":
+            from .aip_shim import BUILTIN_PROFILES
+            profiles = {}
+            for cli_name, data in sorted(BUILTIN_PROFILES.items()):
+                profiles[cli_name] = {
+                    "tier": data.get("tier", "intercept"),
+                }
+                if data.get("interactive_intercept"):
+                    profiles[cli_name]["prompt_regex"] = data["interactive_intercept"]["prompt_regex"]
+            print(json.dumps(profiles, indent=2))
+            return 0
+
+        if args.shim_command in ("watch", "check"):
+            profile = load_profile(args.cli, profiles_dir=args.profiles_dir)
+            if profile.tier == "native":
+                print(json.dumps({
+                    "error": f"{args.cli} uses native hooks (Tier 1), shim not needed",
+                    "cli": args.cli,
+                    "tier": "native",
+                }))
+                return 1
+
+            shim = AipShim(
+                args.workspace_root,
+                session_name=args.session_name,
+                tmux_controller=tmux,
+                auto_approve=args.auto_approve,
+            )
+            shim.add_agent(args.agent_name, profile)
+
+            if args.shim_command == "check":
+                result = shim.check_once(args.agent_name)
+                print(json.dumps(result or {"detected": False}))
+                return 0
+
+            # watch mode
+            shim.run(max_iterations=args.max_iterations)
             return 0
 
     raise AssertionError("Unhandled command")
