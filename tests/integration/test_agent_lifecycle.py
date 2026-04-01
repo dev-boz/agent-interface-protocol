@@ -98,7 +98,8 @@ def main():
     output = result.stdout
     assert "SESSION_ID=test-session-123" in output
     print("✓ Resumed agent can access previous session state")
-    print(f"  State: {[line for line in output.split('\\n') if 'SESSION_ID' in line][0].strip()}")
+    lines = output.split('\n')
+    print(f"  State: {[line for line in lines if 'SESSION_ID' in line][0].strip()}")
 
     # Phase 6: Verify workspace persistence
     print("\n📁 Phase 6: Verify workspace persistence")
