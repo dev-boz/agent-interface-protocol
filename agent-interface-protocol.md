@@ -8,28 +8,22 @@ Instead of protocols (ACP, SSE), servers, message brokers, or frameworks — you
 
 ## How Agent Interface Protocol Is Different
 
-Every existing tool in this space either adds unnecessary infrastructure or solves only part of the problem.
-
-| Tool | What it does | What it doesn't do |
-|---|---|---|
-| **CAO** (AWS Labs) | tmux sessions + MCP coordination | Requires an HTTP server to broker messages |
-| **CSP** | CLI agents in tmux with PTY proxy | Requires a WebSocket/HTTP gateway |
-| **dmux** | Parallel agents in tmux + git worktrees | No inter-agent communication — agents are isolated |
-| **NTM** | Named tmux pane management + broadcast | No agent awareness — just sends same prompt to all |
-| **Overstory** | Rich orchestration with tool guards | SQLite mail system, heavy framework, 36 CLI commands |
-| **Operator** | Kanban-driven agent orchestration | REST API, web component, ticket-first not agent-first |
-| **workmux** | tmux windows per git worktree | Session manager, no agent coordination |
-| **claude-code-agent-farm** | 20+ parallel Claude Code agents | Single-vendor (Claude only), lock-based coordination |
-| **organisciak/atmux** | tmux session manager with browse/send | Session management only, no shared memory or MCP |
-
-**Agent Interface Protocol is the only design where agents read each other directly via tmux panes, coordinate through one shared MCP server, and need zero servers, zero brokers, zero frameworks.**
+| Other approaches | AIP |
+|---|---|
+| Requires HTTP server or WebSocket gateway | tmux only — zero servers |
+| Agents isolated, no inter-agent communication | Any agent reads any other agent's pane |
+| Vendor lock-in (single CLI or model) | Any CLI agent or vendor (11 backends, 3 tiers) |
+| Heavy frameworks, dozens of CLI commands | Selective MCP tools + tmux commands |
+| Message brokers, pub/sub, REST APIs | Shared filesystem + tmux pane buffers |
+| Protocol adapters per vendor | LLMs are the parser — the protocol is English |
+| Special orchestrator process or server | Orchestrator is just another agent — swap mid-session |
 
 The key differences:
 
-- **No server**: CAO and CSP both require a running server process to broker messages. Agent Interface Protocol has none. The tmux server IS the infrastructure.
-- **Agents are aware of each other**: dmux, NTM, and workmux run agents in parallel but agents don't know about each other. In Agent Interface Protocol, any agent can read any other agent's pane.
-- **Vendor neutral**: claude-code-agent-farm is Claude-only. Agent Interface Protocol works with any CLI agent — Claude, Gemini, Kimi, aider, Codex, anything.
-- **Minimal footprint**: Overstory has 36 CLI commands and a SQLite mail system. Agent Interface Protocol is hooks (3-tier) + 5 MCP tools and tmux commands.
+- **No server**: Doesn't require a running server process to broker messages. Agent Interface Protocol has none. The tmux server IS the infrastructure.
+- **Agents are aware of each other**: In Agent Interface Protocol, any agent can read any other agent's pane.
+- **Vendor neutral**: Agent Interface Protocol works with any CLI agent — Claude, Gemini, Kimi, aider, Codex, anything.
+- **Minimal footprint**: Agent Interface Protocol is hooks (3-tier) + 5 MCP tools and tmux commands.
 - **The orchestrator is just another agent**: not a special process, not a server, not a framework. Any CLI agent can orchestrate. Swap orchestrators mid-session.
 
 ## Architecture

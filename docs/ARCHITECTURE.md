@@ -20,13 +20,11 @@ Instead of protocols (ACP, SSE), servers, message brokers, or frameworks — you
 
 The key differences:
 
-No server. The tmux server IS the infrastructure.
-Agents are aware of each other, any agent can read any other agent's pane.
-Vendor neutral: AIP works with 11 supported backends across three tiers — claude-code, copilot, gemini, kiro, codex, opencode, cursor, qwen, kilo (Tier 1 native hooks), and amp, vibe/Mistral (Tier 2 aip-shim).
-Minimal footprint: AIP stays small: selective MCP tools, CLI hooks where available, and tmux commands.
-The orchestrator is just another agent: not a special process, not a server, not a framework. Any CLI agent can orchestrate. Swap orchestrators mid-session.
-
-
+- **No server**: Doesn't require a running server process to broker messages. Agent Interface Protocol has none. The tmux server IS the infrastructure.
+- **Agents are aware of each other**: In Agent Interface Protocol, any agent can read any other agent's pane.
+- **Vendor neutral**: Agent Interface Protocol works with any CLI agent — Claude, Gemini, Kimi, aider, Codex, anything.
+- **Minimal footprint**: Agent Interface Protocol is hooks (3-tier) + 5 MCP tools and tmux commands.
+- **The orchestrator is just another agent**: not a special process, not a server, not a framework. Any CLI agent can orchestrate. Swap orchestrators mid-session.
 
 
 ## Architecture
