@@ -5,6 +5,7 @@ import time
 import pytest
 
 from aip.mcp_server import AipToolRuntime, TOOL_SPECS, ToolInputError, resolve_allowed_tools
+from aip.tmux import PaneMetrics
 
 
 class FakeTmuxController:
@@ -13,6 +14,10 @@ class FakeTmuxController:
         self.spawn_calls = []
         self.killed = []
         self.sent_keys = []
+        self.capture_calls = []
+        self.metrics_calls = []
+        self.capture_results = []
+        self.metrics_results = []
 
     def spawn_window(self, window_name, command, start_directory=None):
         self.spawn_calls.append((window_name, command, start_directory))
@@ -23,9 +28,29 @@ class FakeTmuxController:
     def send_keys(self, target, text, press_enter=True):
         self.sent_keys.append((target, text, press_enter))
 
+    def capture_pane(self, target, *, lines=None, include_escape=False, start_line=None, end_line=None):
+        self.capture_calls.append(
+            {
+                "target": target,
+                "lines": lines,
+                "include_escape": include_escape,
+                "start_line": start_line,
+                "end_line": end_line,
+            }
+        )
+        if self.capture_results:
+            return self.capture_results.pop(0)
+        return ""
 
-def test_tool_specs_has_eight_tools():
-    assert len(TOOL_SPECS) == 8
+    def pane_metrics(self, target):
+        self.metrics_calls.append(target)
+        if self.metrics_results:
+            return self.metrics_results.pop(0)
+        return PaneMetrics(history_size=0, pane_height=24)
+
+
+def test_tool_specs_has_nine_tools():
+    assert len(TOOL_SPECS) == 9
     names = {s["name"] for s in TOOL_SPECS}
     assert names == {
         "report_status",
@@ -33,6 +58,7 @@ def test_tool_specs_has_eight_tools():
         "register_capabilities",
         "request_task",
         "report_progress",
+        "read_pane",
         "wait_for",
         "spawn_teammate",
         "notify",
@@ -90,6 +116,167 @@ def test_report_progress(tmp_path):
     result = json.loads(runtime.execute("report_progress", {"progress": "halfway done", "percentage": 50}))
     assert result["progress"] == "halfway done"
     assert result["percentage"] == 50
+
+
+def test_read_pane_returns_full_capture(tmp_path):
+    tmux = FakeTmuxController()
+    tmux.capture_results = ["full pane output"]
+    runtime = AipToolRuntime(
+        str(tmp_path / "workspace"),
+        "architect",
+        tmux_controller=tmux,
+        tool_profile="architect",
+    )
+
+    result = json.loads(runtime.execute("read_pane", {"target_agent": "coder"}))
+
+    assert result["target_agent"] == "coder"
+    assert result["content"] == "full pane output"
+    assert result["incremental"] is False
+    assert tmux.capture_calls == [
+        {
+            "target": "coder",
+            "lines": None,
+            "include_escape": False,
+            "start_line": None,
+            "end_line": None,
+        }
+    ]
+
+
+def test_read_pane_incremental_tracks_cursor_per_target(tmp_path):
+    tmux = FakeTmuxController()
+    tmux.metrics_results = [
+        PaneMetrics(history_size=10, pane_height=5),
+        PaneMetrics(history_size=14, pane_height=5),
+        PaneMetrics(history_size=14, pane_height=5),
+    ]
+    tmux.capture_results = [
+        "initial pane output",
+        "only new output",
+        "initial pane output\nonly new output",
+        "initial pane output\nonly new output",
+    ]
+    runtime = AipToolRuntime(
+        str(tmp_path / "workspace"),
+        "architect",
+        tmux_controller=tmux,
+        tool_profile="architect",
+    )
+
+    first = json.loads(runtime.execute("read_pane", {"target_agent": "coder", "incremental": True}))
+    second = json.loads(runtime.execute("read_pane", {"target_agent": "coder", "incremental": True}))
+    third = json.loads(runtime.execute("read_pane", {"target_agent": "coder", "incremental": True}))
+
+    assert first["content"] == "initial pane output"
+    assert first["cursor_before"] is None
+    assert first["cursor_after"] == 15
+    assert first["stale_cursor"] is False
+
+    assert second["content"] == "only new output"
+    assert second["cursor_before"] == 15
+    assert second["cursor_after"] == 19
+    assert second["stale_cursor"] is False
+
+    assert third["content"] == ""
+    assert third["cursor_before"] == 19
+    assert third["cursor_after"] == 19
+    assert third["stale_cursor"] is False
+
+    assert tmux.capture_calls == [
+        {
+            "target": "coder",
+            "lines": None,
+            "include_escape": False,
+            "start_line": None,
+            "end_line": None,
+        },
+        {
+            "target": "coder",
+            "lines": None,
+            "include_escape": False,
+            "start_line": 1,
+            "end_line": -1,
+        },
+        {
+            "target": "coder",
+            "lines": None,
+            "include_escape": False,
+            "start_line": None,
+            "end_line": None,
+        },
+        {
+            "target": "coder",
+            "lines": None,
+            "include_escape": False,
+            "start_line": None,
+            "end_line": None,
+        },
+    ]
+
+
+def test_read_pane_incremental_falls_back_to_full_when_cursor_is_stale(tmp_path):
+    tmux = FakeTmuxController()
+    tmux.metrics_results = [
+        PaneMetrics(history_size=20, pane_height=5),
+        PaneMetrics(history_size=3, pane_height=5),
+    ]
+    tmux.capture_results = [
+        "initial pane output",
+        "full pane after reset",
+    ]
+    runtime = AipToolRuntime(
+        str(tmp_path / "workspace"),
+        "architect",
+        tmux_controller=tmux,
+        tool_profile="architect",
+    )
+
+    runtime.execute("read_pane", {"target_agent": "coder", "incremental": True})
+    result = json.loads(runtime.execute("read_pane", {"target_agent": "coder", "incremental": True}))
+
+    assert result["content"] == "full pane after reset"
+    assert result["stale_cursor"] is True
+    assert result["cursor_before"] == 25
+    assert result["cursor_after"] == 8
+    assert tmux.capture_calls[-1] == {
+        "target": "coder",
+        "lines": None,
+        "include_escape": False,
+        "start_line": None,
+        "end_line": None,
+    }
+
+
+def test_read_pane_incremental_diffs_when_visible_pane_changes_without_line_growth(tmp_path):
+    tmux = FakeTmuxController()
+    tmux.metrics_results = [
+        PaneMetrics(history_size=0, pane_height=24),
+        PaneMetrics(history_size=0, pane_height=24),
+    ]
+    tmux.capture_results = [
+        "prompt\n",
+        "prompt\nBETA\n",
+    ]
+    runtime = AipToolRuntime(
+        str(tmp_path / "workspace"),
+        "architect",
+        tmux_controller=tmux,
+        tool_profile="architect",
+    )
+
+    first = json.loads(runtime.execute("read_pane", {"target_agent": "coder", "incremental": True}))
+    second = json.loads(runtime.execute("read_pane", {"target_agent": "coder", "incremental": True}))
+
+    assert first["content"] == "prompt\n"
+    assert second["content"] == "BETA\n"
+
+
+def test_read_pane_rejects_incremental_and_lines_together(tmp_path):
+    runtime = AipToolRuntime(str(tmp_path / "workspace"), "architect", tool_profile="architect")
+
+    with pytest.raises(ToolInputError, match="cannot be combined with lines"):
+        runtime.execute("read_pane", {"target_agent": "coder", "incremental": True, "lines": 5})
 
 
 def test_wait_for_matches_existing_event(tmp_path):

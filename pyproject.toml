@@ -44,3 +44,7 @@ include = ["aip*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "live_tmux: exercises the real tmux-backed CLI and MCP flows",
+    "live_cli: exercises installed AI CLI backends in real tmux panes",
+]

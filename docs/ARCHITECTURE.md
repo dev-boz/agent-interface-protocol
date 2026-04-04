@@ -131,9 +131,12 @@ spawn_teammate
 
 notify
   - send agent-to-agent messages with event-log delivery and priority-aware injection
+
+read_pane
+  - inspect live tmux pane output, including cursor-based incremental reads
 ```
 
-The key change from the original design is selectivity: not every agent gets all 8 tools. `aip-mcp --tool-profile ...` trims the surface area by role, and hook-capable workers can avoid `report_status` and `report_progress` entirely.
+The key change from the original design is selectivity: not every agent gets all 9 tools. `aip-mcp --tool-profile ...` trims the surface area by role, and hook-capable workers can avoid `report_status` and `report_progress` entirely.
 
 ### Event Log Format
 
@@ -492,9 +495,10 @@ The whole point is to minimise token burn. Agents should almost never read raw p
 | 1 | `tail -n 20 workspace/events.jsonl` | ~50 tokens | Always check first — what happened? |
 | 2 | `cat workspace/status/coder.json` | ~20 tokens | Who's doing what right now? |
 | 3 | `cat workspace/summaries/coder-0317.md` | ~100 tokens | What did they produce? |
-| 4 | `tmux capture-pane -pt aip:coder -S -5` | ~30 tokens | Quick peek at live output (last 5 lines) |
-| 5 | `tmux capture-pane -pt aip:coder -S -20` | ~100 tokens | Need more context — expand progressively |
-| 6 | Full pane read | ~1000+ tokens | Almost never needed |
+| 4 | `read_pane(incremental=true)` | ~20 tokens | What's changed since the last read? |
+| 5 | `tmux capture-pane -pt aip:coder -S -5` | ~30 tokens | Quick peek at live output (last 5 lines) |
+| 6 | `tmux capture-pane -pt aip:coder -S -20` | ~100 tokens | Need more context — expand progressively |
+| 7 | Full pane read | ~1000+ tokens | Almost never needed |
 
 ### Progressive Reverse Reading
 
@@ -513,6 +517,12 @@ tmux capture-pane -pt aip:coder -S -50
 
 Combined with the marker system, the agent reads backwards until it hits the marker and stops. It never reads thinking tokens. The output section might be 10 lines while the thinking was 200 — progressive reverse reading means you only pay for the 10.
 
+### Incremental Reads
+
+For agents that monitor another pane repeatedly, the MCP `read_pane` tool supports `incremental=true`. The runtime keeps a cursor per `(reader, target)` pair and returns only newly appended pane output after the first read.
+
+If tmux history shrinks or the cursor is no longer valid, AIP falls back to a full pane capture and reseeds the cursor automatically.
+
 ### The Rule
 
 Instruct every agent: **"Check events.jsonl first. Read summaries second. Only read panes when the structured data isn't enough, and read from the bottom up."**
@@ -530,6 +540,7 @@ AIP doesn't depend on ACP or A2A, but the MCP tools map cleanly to both:
 | `request_task` | Task delegation | Task assignment |
 | `export_summary` | Task artifact | Task artifact |
 | `report_progress` | Progress events | Progress updates |
+| `read_pane` | No direct equivalent | No direct equivalent |
 
 If the ecosystem converges, add a flag: `AIP_ACP_COMPAT=true`. The MCP tools then also emit ACP-formatted events alongside the file writes. Compatibility without coupling — build it later if needed.
 

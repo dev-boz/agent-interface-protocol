@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from . import __version__
@@ -197,6 +198,24 @@ TOOL_SPECS = (
         },
     },
     {
+        "name": "read_pane",
+        "description": "Read another agent's tmux pane, with optional cursor-based incremental mode.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_agent": {"type": "string"},
+                "lines": {"type": "integer", "minimum": 1},
+                "include_escape": {"type": "boolean"},
+                "incremental": {
+                    "type": "boolean",
+                    "description": "Return only new pane output since this reader last checked the target.",
+                },
+            },
+            "required": ["target_agent"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "wait_for",
         "description": "Block until a matching event appears in workspace/events.jsonl or timeout expires.",
         "inputSchema": {
@@ -276,17 +295,20 @@ TOOL_PROFILES: dict[str, tuple[str, ...]] = {
     ),
     "reviewer": (
         "export_summary",
+        "read_pane",
         "notify",
         "register_capabilities",
     ),
     "architect": (
         "export_summary",
+        "read_pane",
         "notify",
         "register_capabilities",
     ),
     "manager": (
         "export_summary",
         "register_capabilities",
+        "read_pane",
         "request_task",
         "wait_for",
         "spawn_teammate",
@@ -296,6 +318,14 @@ TOOL_PROFILES: dict[str, tuple[str, ...]] = {
 
 class ToolInputError(ValueError):
     """Raised when tool input does not satisfy AIP expectations."""
+
+
+@dataclass
+class PaneCursorState:
+    next_line: int
+    total_lines: int
+    history_size: int
+    last_capture: str
 
 
 def resolve_allowed_tools(
@@ -344,6 +374,7 @@ class AipToolRuntime:
         self.allowed_tools = frozenset(
             resolve_allowed_tools(tool_profile=tool_profile, allowed_tools=allowed_tools)
         )
+        self._pane_cursors: dict[tuple[str, str], PaneCursorState] = {}
 
     def execute(self, name: str, arguments: dict[str, Any] | None) -> str:
         if name not in TOOL_NAMES:
@@ -367,6 +398,13 @@ class AipToolRuntime:
             )
         if name == "report_progress":
             return self.report_progress(args["progress"], percentage=args.get("percentage"))
+        if name == "read_pane":
+            return self.read_pane(
+                target_agent=args["target_agent"],
+                lines=args.get("lines"),
+                include_escape=args.get("include_escape", False),
+                incremental=args.get("incremental", False),
+            )
         if name == "wait_for":
             return self.wait_for(args["event_filter"], timeout=args.get("timeout"))
         if name == "spawn_teammate":
@@ -489,6 +527,103 @@ class AipToolRuntime:
             percentage=percentage,
         )
         return json.dumps(snapshot, indent=2)
+
+    def read_pane(
+        self,
+        *,
+        target_agent: str,
+        lines: int | None = None,
+        include_escape: bool = False,
+        incremental: bool = False,
+    ) -> str:
+        target = sanitize_component(target_agent)
+        if not target:
+            raise ToolInputError("target_agent must contain at least one valid character")
+        if lines is not None and lines <= 0:
+            raise ToolInputError("lines must be greater than zero")
+        if incremental and lines is not None:
+            raise ToolInputError("incremental pane reads cannot be combined with lines")
+
+        if not incremental:
+            content = self.tmux.capture_pane(
+                target,
+                lines=lines,
+                include_escape=include_escape,
+            )
+            return json.dumps(
+                {
+                    "target_agent": target,
+                    "content": content,
+                    "incremental": False,
+                    "stale_cursor": False,
+                    "cursor_before": None,
+                    "cursor_after": None,
+                },
+                indent=2,
+            )
+
+        metrics = self.tmux.pane_metrics(target)
+        cursor_key = (self.agent_name, target)
+        cursor_state = self._pane_cursors.get(cursor_key)
+        cursor_before = cursor_state.next_line if cursor_state is not None else None
+        stale_cursor = False
+        latest_capture: str
+
+        if cursor_state is None:
+            latest_capture = self.tmux.capture_pane(target, include_escape=include_escape)
+            content = latest_capture
+        else:
+            stale_cursor = (
+                metrics.total_lines < cursor_state.total_lines
+                or metrics.history_size < cursor_state.history_size
+                or cursor_state.next_line > metrics.total_lines
+            )
+            if stale_cursor:
+                latest_capture = self.tmux.capture_pane(target, include_escape=include_escape)
+                content = latest_capture
+            elif (
+                metrics.total_lines == cursor_state.total_lines
+                and metrics.history_size == cursor_state.history_size
+            ):
+                latest_capture = self.tmux.capture_pane(target, include_escape=include_escape)
+                content = self._diff_pane_content(cursor_state.last_capture, latest_capture)
+            else:
+                start_line = cursor_state.next_line - metrics.history_size
+                content = self.tmux.capture_pane(
+                    target,
+                    include_escape=include_escape,
+                    start_line=start_line,
+                    end_line=-1,
+                )
+                latest_capture = self.tmux.capture_pane(target, include_escape=include_escape)
+
+        self._pane_cursors[cursor_key] = PaneCursorState(
+            next_line=metrics.total_lines,
+            total_lines=metrics.total_lines,
+            history_size=metrics.history_size,
+            last_capture=latest_capture,
+        )
+        return json.dumps(
+            {
+                "target_agent": target,
+                "content": content,
+                "incremental": True,
+                "stale_cursor": stale_cursor,
+                "cursor_before": cursor_before,
+                "cursor_after": metrics.total_lines,
+            },
+            indent=2,
+        )
+
+    @staticmethod
+    def _diff_pane_content(previous: str, current: str) -> str:
+        previous_lines = previous.splitlines(keepends=True)
+        current_lines = current.splitlines(keepends=True)
+        index = 0
+        limit = min(len(previous_lines), len(current_lines))
+        while index < limit and previous_lines[index] == current_lines[index]:
+            index += 1
+        return "".join(current_lines[index:])
 
     def wait_for(self, event_filter: str | list[str], *, timeout: float | None = None) -> str:
         filters = self._normalize_event_filters(event_filter)

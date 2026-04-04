@@ -221,6 +221,13 @@ register_capabilities
   - purpose: orchestrator knows who can do what and what each agent cares about
   - WHO NEEDS IT: agents at startup only (can be done by hook handler instead)
 
+read_pane
+  - args: target_agent, incremental (optional bool), lines (optional), include_escape (optional bool)
+  - reads: target tmux pane
+  - returns: pane content plus cursor metadata
+  - purpose: inspect live terminal output, including cursor-based incremental reads for periodic monitoring
+  - WHO NEEDS IT: orchestrators, architects, reviewers, managers who monitor other agents
+
 request_task
   - args: target_role (optional), task_description, context (optional), priority (optional)
   - writes: workspace/tasks/pending/{task_id}.md
@@ -260,10 +267,10 @@ notify
 | Role | Hooks | MCP Tools Needed | Tool Context Cost |
 |---|---|---|---|
 | Pure worker (coder, tester) | Tier 1 or 2 (automatic) | `export_summary` only (or zero) | ~60-100 tokens |
-| Reviewer | Tier 1 or 2 (automatic) | `export_summary` + `notify` | ~150-200 tokens |
-| Architect | Tier 1 or 2 (automatic) | `export_summary` + `notify` | ~150-200 tokens |
-| Manager | Tier 1 or 2 (automatic) | `export_summary` + `request_task` + `wait_for` + `spawn_teammate` | ~350-400 tokens |
-| Orchestrator | Tier 1 or 2 (automatic) | Full set | ~500-600 tokens |
+| Reviewer | Tier 1 or 2 (automatic) | `export_summary` + `read_pane` + `notify` | ~200-250 tokens |
+| Architect | Tier 1 or 2 (automatic) | `export_summary` + `read_pane` + `notify` | ~200-250 tokens |
+| Manager | Tier 1 or 2 (automatic) | `export_summary` + `read_pane` + `request_task` + `wait_for` + `spawn_teammate` | ~400-450 tokens |
+| Orchestrator | Tier 1 or 2 (automatic) | Full set | ~550-650 tokens |
 
 **No agent needs `report_status` or `report_progress` as MCP tools.** Hooks (native or shim) handle all status reporting automatically. Every worker agent carries ≤100 tokens of tool overhead regardless of which CLI it runs.
 
@@ -851,6 +858,7 @@ Agent Interface Protocol doesn't depend on ACP or A2A, but the MCP tools map cle
 | Hooks: status events | Task status events | Task status updates |
 | Hooks: tool events | Progress events | Progress updates |
 | `register_capabilities` | Agent description | Agent Card |
+| `read_pane` | No direct equivalent | No direct equivalent |
 | `request_task` | Task delegation | Task assignment |
 | `export_summary` | Task artifact | Task artifact |
 | `wait_for` | Task completion callback | Task status subscription |

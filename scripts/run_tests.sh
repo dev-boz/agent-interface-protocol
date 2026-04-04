@@ -62,6 +62,20 @@ run_test "Full orchestration cycle" "python tests/integration/test_full_cycle.py
 run_test "Agent lifecycle test" "python tests/integration/test_agent_lifecycle.py"
 run_test "Orchestrator crash recovery" "python tests/integration/test_orchestrator_recovery.py"
 
+if [ "${AIP_RUN_LIVE_TMUX:-0}" = "1" ]; then
+    echo ""
+    echo "Phase 2b: Live tmux pytest tests"
+    echo "------------------------------------------------------------"
+    run_test "Live tmux pytest" "AIP_RUN_LIVE_TMUX=1 python -m pytest -q tests/integration/test_live_core.py"
+fi
+
+if [ "${AIP_RUN_LIVE_TMUX:-0}" = "1" ] && [ "${AIP_RUN_LIVE_CLI:-0}" = "1" ]; then
+    echo ""
+    echo "Phase 2c: Live backend smoke tests"
+    echo "------------------------------------------------------------"
+    run_test "Live backend pytest" "AIP_RUN_LIVE_TMUX=1 AIP_RUN_LIVE_CLI=1 python -m pytest -q tests/integration/test_live_backends.py"
+fi
+
 echo ""
 echo "Phase 3: CLI Commands"
 echo "------------------------------------------------------------"

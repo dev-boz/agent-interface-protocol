@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/dev-boz/agent-interface-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-boz/agent-interface-protocol/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Status: Work in Progress** — the core works and has 195 passing tests, but this is early-stage. Contributions, feedback, and new backend adapters are very welcome.
+> **Status: Work in Progress** — the core works and has 201 passing tests, but this is early-stage. Contributions, feedback, and new backend adapters are very welcome.
 
 Provider-agnostic multi-agent orchestration with near-zero infrastructure. tmux handles process management, inter-process communication, and session persistence. A shared MCP server and filesystem workspace handle coordination. LLMs can already parse each other's natural-language output, so protocol normalization between agents may be unnecessary.
 
@@ -57,9 +57,10 @@ Always check in this order — never jump to pane reads when structured data exi
 | 1 | `tail -n 20 workspace/events.jsonl` | ~50 tokens | What happened? |
 | 2 | `cat workspace/status/coder.json` | ~20 tokens | Who's doing what? |
 | 3 | `cat workspace/summaries/coder-0317.md` | ~100 tokens | What did they produce? |
-| 4 | `tmux capture-pane -pt aip:coder -S -5` | ~30 tokens | Quick peek (last 5 lines) |
-| 5 | `tmux capture-pane -pt aip:coder -S -20` | ~100 tokens | More context |
-| 6 | Full pane read | ~1000+ tokens | Almost never needed |
+| 4 | `read_pane(incremental=true)` | ~20 tokens | What's changed since last check? |
+| 5 | `tmux capture-pane -pt aip:coder -S -5` | ~30 tokens | Quick peek (last 5 lines) |
+| 6 | `tmux capture-pane -pt aip:coder -S -20` | ~100 tokens | More context |
+| 7 | Full pane read | ~1000+ tokens | Almost never needed |
 
 ## Quick Start
 
@@ -113,7 +114,6 @@ AIP is usable today for local multi-agent workflows, but there's plenty of room 
 - [ ] **`aip dashboard`** — live multiplexed view of all agents working in real time
 - [ ] **Additional Tier 2 shims** — Windsurf, Cline, Aider, and other CLIs without native hooks
 - [ ] **ACP/A2A compatibility layer** — optional flag to emit ACP-formatted events alongside file writes
-- [ ] **Incremental pane reads** — cursor-based reads to avoid re-reading old output (massive token savings)
 - [ ] **Remote multi-machine orchestration** — SSH-based workspace sync across hosts
 - [ ] **IDE extension (VSIX)** — integrate AIP transparently into VS Code, Cursor, Windsurf
 
@@ -138,7 +138,14 @@ pip install -e '.[dev]'   # also installs pytest for development
 python -m pytest tests/ -q
 ```
 
-195 tests covering workspace primitives, task queue, hook normalization, MCP tools, CLI commands, and multi-backend collaboration. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Optional live suites:
+
+```bash
+AIP_RUN_LIVE_TMUX=1 python -m pytest -q tests/integration/test_live_core.py
+AIP_RUN_LIVE_TMUX=1 AIP_RUN_LIVE_CLI=1 python -m pytest -q tests/integration/test_live_backends.py
+```
+
+202 tests covering workspace primitives, task queue, hook normalization, MCP tools, CLI commands, multi-backend collaboration, and opt-in live tmux/CLI coverage. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Documentation
 

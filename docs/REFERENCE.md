@@ -257,17 +257,17 @@ The exact config location varies per CLI. For Gemini, Kiro, Codex, Cursor, and Q
 
 | Profile | Intended Use | Tools |
 |---|---|---|
-| `full` / `orchestrator` | broad control surface | all 8 tools |
+| `full` / `orchestrator` | broad control surface | all 9 tools |
 | `worker` | hook-capable execution agents | `export_summary`, `register_capabilities` |
 | `worker-hookless` | workers on CLIs without hooks | `report_status`, `report_progress`, `export_summary`, `register_capabilities` |
-| `reviewer` / `architect` | advisory agents | `export_summary`, `notify`, `register_capabilities` |
-| `manager` | delegation-heavy coordinators | `export_summary`, `register_capabilities`, `request_task`, `wait_for`, `spawn_teammate` |
+| `reviewer` / `architect` | advisory agents | `export_summary`, `read_pane`, `notify`, `register_capabilities` |
+| `manager` | delegation-heavy coordinators | `export_summary`, `register_capabilities`, `read_pane`, `request_task`, `wait_for`, `spawn_teammate` |
 
 Hook-capable workers should use hooks for lifecycle/status telemetry. `report_status` and `report_progress` remain as fallback tools for hookless CLIs.
 
 ### Tools
 
-AIP exposes the full 8-tool coordination surface described in the project spec.
+AIP exposes the full 9-tool coordination surface described in the project spec.
 
 Every tool call automatically appends a one-line JSON event to `workspace/events.jsonl`.
 
@@ -413,6 +413,29 @@ Lightweight progress update without full pane reads. This is primarily the fallb
 ```json
 {"progress": "3 of 5 files done", "percentage": 60}
 ```
+
+#### `read_pane`
+
+Read another agent's tmux pane. In incremental mode, AIP keeps an in-memory cursor per `(reader, target)` pair and returns only newly appended output.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `target_agent` | string | ✅ | Which agent pane to read |
+| `lines` | integer | | Tail-like capture hint for non-incremental reads |
+| `include_escape` | boolean | | Preserve ANSI escape sequences |
+| `incremental` | boolean | | Return only output added since this reader last checked |
+
+**Reads**: target tmux pane
+**Returns**: pane content plus cursor metadata
+
+```json
+{"target_agent": "coder", "incremental": true}
+```
+
+Notes:
+- `incremental: true` cannot be combined with `lines`
+- first incremental read falls back to a full pane capture and seeds the cursor
+- if tmux history shrinks or the cursor becomes invalid, AIP falls back to a full capture automatically
 
 #### `wait_for`
 
@@ -787,6 +810,7 @@ AIP MCP tools map cleanly to both protocols:
 | `request_task` | Task delegation | Task assignment |
 | `export_summary` | Task artifact | Task artifact |
 | `report_progress` | Progress events | Progress updates |
+| `read_pane` | No direct equivalent | No direct equivalent |
 | `wait_for` | Task completion callback | Task status subscription |
 | `spawn_teammate` | Sub-task delegation | Child task creation |
 | `notify` | Agent messaging | Agent-to-agent communication |
@@ -819,7 +843,7 @@ Future: add `AIP_ACP_COMPAT=true` flag to emit ACP-formatted events alongside fi
 | `cli.py` | Operator CLI — all `aip` subcommands | ~340 |
 | `hooks.py` | Hook runtime — event normalization, stdin adapters, workspace writes | ~285 |
 | `hook_configs.py` | CLI config generation and install/merge helpers | ~433 |
-| `mcp_server.py` | MCP server — MCP SDK wiring, 8 tools, and selective profiles | ~786 |
+| `mcp_server.py` | MCP server — MCP SDK wiring, 9 tools, and selective profiles | ~786 |
 
 ---
 
@@ -832,5 +856,5 @@ Future: add `AIP_ACP_COMPAT=true` flag to emit ACP-formatted events alongside fi
 | `tmux.py` | 4 | Command generation via FakeRunner (no real tmux needed) |
 | `hooks.py` | 13 | Hook normalization, stdin parsing, Codex notification mapping, workspace writes |
 | `hook_configs.py` | 10 | Config generation and non-destructive install/merge for Gemini, Kiro, Codex |
-| `mcp_server.py` | 32 | Tool calls, profiles, interests, wait_for, spawn_teammate, notify, spawn rollback, corrupt event recovery |
+| `mcp_server.py` | 36 | Tool calls, profiles, interests, read_pane, wait_for, spawn_teammate, notify, spawn rollback, corrupt event recovery |
 | `cli.py` | 5 | Init, hook proxy/config/install flows, agent kill with tree preservation on kill failure |

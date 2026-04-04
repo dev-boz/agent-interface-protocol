@@ -109,6 +109,15 @@ Fallback tool for hookless CLIs.
 ```
 Fallback tool for hookless CLIs.
 
+### read_pane
+```json
+{
+  "target_agent": "coder",
+  "incremental": true
+}
+```
+Returns only new pane output after the first read when `incremental` is enabled.
+
 ### wait_for
 ```json
 {
@@ -178,9 +187,10 @@ Always check in this order:
 | 1 | `tail -n 20 events.jsonl` | ~50 tokens | What happened? |
 | 2 | `cat status/coder.json` | ~20 tokens | Who's doing what? |
 | 3 | `cat summaries/coder-*.md` | ~100 tokens | What did they produce? |
-| 4 | `capture-pane -S -5` | ~30 tokens | Quick peek |
-| 5 | `capture-pane -S -20` | ~100 tokens | More context |
-| 6 | Full pane read | ~1000+ tokens | Almost never needed |
+| 4 | `read_pane(incremental=true)` | ~20 tokens | What's changed since last check? |
+| 5 | `capture-pane -S -5` | ~30 tokens | Quick peek |
+| 6 | `capture-pane -S -20` | ~100 tokens | More context |
+| 7 | Full pane read | ~1000+ tokens | Almost never needed |
 
 ---
 

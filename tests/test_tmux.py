@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from aip.tmux import TmuxController
+from aip.tmux import PaneMetrics, TmuxController
 
 
 class FakeRunner:
@@ -73,6 +73,44 @@ def test_capture_pane_uses_line_limit_and_session_target():
         "aip:coder",
         "-S",
         "-50",
+    ]
+
+
+def test_capture_pane_supports_explicit_range():
+    runner = FakeRunner(completed(["tmux"], stdout="incremental output"))
+    controller = TmuxController("aip", runner=runner)
+
+    output = controller.capture_pane("coder", start_line=7, end_line=-1)
+
+    assert output == "incremental output"
+    assert runner.calls[0] == [
+        "tmux",
+        "capture-pane",
+        "-p",
+        "-t",
+        "aip:coder",
+        "-S",
+        "7",
+        "-E",
+        "-1",
+    ]
+
+
+def test_pane_metrics_reads_history_and_height():
+    runner = FakeRunner(completed(["tmux"], stdout="120\t24\n"))
+    controller = TmuxController("aip", runner=runner)
+
+    metrics = controller.pane_metrics("coder")
+
+    assert metrics == PaneMetrics(history_size=120, pane_height=24)
+    assert metrics.total_lines == 144
+    assert runner.calls[0] == [
+        "tmux",
+        "display-message",
+        "-p",
+        "-t",
+        "aip:coder",
+        "#{history_size}\t#{pane_height}",
     ]
 
 

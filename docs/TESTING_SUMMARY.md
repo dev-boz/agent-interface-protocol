@@ -1,13 +1,13 @@
 # Agent Interface Protocol (AIP) Testing Summary
 
-**Date**: 2026-03-30
-**Status**: ✅ Current suite passing; hooks, selective MCP profiles, aip-shim, and all 11 backends verified
+**Date**: 2026-04-04
+**Status**: ✅ Current suite passing; hooks, selective MCP profiles, aip-shim, all 11 backends, and opt-in live tmux/CLI suites verified
 
 ## Test Results
 
 ### Current Suite
 ```
-194 tests passing
+202 tests passing, 9 skipped by default
 ```
 
 **Coverage:**
@@ -21,6 +21,8 @@
 - `aip_shim.py` - Tier 2 interactive intercept shim for vibe and amp backends
 - `test_all_backends.py` - 66 tests: registry completeness, per-backend hook configs, shim profiles, MCP runtime, task lifecycle for all 11 backends
 - `test_multi_backend_collab.py` - 8 tests: workspace init, hook config generation, MCP runtime, task distribution, dependency chains, cross-agent notify, shim profiles
+- `test_live_core.py` - 5 opt-in live tmux tests: real session lifecycle, live MCP surface, incremental pane reads, lease reclaim, concurrent claiming
+- `test_live_backends.py` - 4 opt-in live backend smoke tests: codex, gemini, qwen, vibe
 
 ### Integration Tests
 
@@ -131,6 +133,30 @@ Simulated orchestrator crash mid-workflow:
 
 **Key finding:** The orchestrator is just another agent. Any agent can read the workspace and take over orchestration.
 
+#### 6. Live tmux pytest suite ✅
+**File**: `test_live_core.py`
+
+Opt-in live tests using isolated real tmux sessions and workspaces:
+- ✅ real `aip init --ensure-session`
+- ✅ real `agent spawn`, `send`, `capture`, `kill`
+- ✅ stdio MCP against the shipped `aip-mcp` entrypoint
+- ✅ live `read_pane(incremental=true)` coverage
+- ✅ live lease expiry / reclaim
+- ✅ live concurrent claiming race
+
+**Key finding:** the live suite caught a real incremental-pane edge case where visible pane content changed without line-count growth. The implementation now diffs the last visible capture in that case.
+
+#### 7. Live backend smoke suite ✅
+**File**: `test_live_backends.py`
+
+Opt-in smoke tests against installed real CLIs in tmux panes:
+- ✅ Codex
+- ✅ Gemini
+- ✅ Qwen
+- ✅ Vibe
+
+Each backend is launched in an isolated tmux pane and must reach a minimal `READY` response.
+
 ## Performance Characteristics
 
 ### Token Efficiency (Read Hierarchy)
@@ -140,9 +166,10 @@ Simulated orchestrator crash mid-workflow:
 | 1 | `tail -n 20 events.jsonl` | ~50 tokens | What happened? |
 | 2 | `cat status/coder.json` | ~20 tokens | Who's doing what? |
 | 3 | `cat summaries/coder-*.md` | ~100 tokens | What did they produce? |
-| 4 | `capture-pane -S -5` | ~30 tokens | Quick peek |
-| 5 | `capture-pane -S -20` | ~100 tokens | More context |
-| 6 | Full pane read | ~1000+ tokens | Almost never needed |
+| 4 | `read_pane(incremental=true)` | ~20 tokens | What's changed since last check? |
+| 5 | `capture-pane -S -5` | ~30 tokens | Quick peek |
+| 6 | `capture-pane -S -20` | ~100 tokens | More context |
+| 7 | Full pane read | ~1000+ tokens | Almost never needed |
 
 **Orchestrator token spend per cycle:**
 - Event log tail: ~50 tokens
@@ -205,6 +232,15 @@ Simulated orchestrator crash mid-workflow:
 | Circuit breaker | Orchestrator reads errors in English | ⏸️ Not tested |
 | Remote agents | SSH | ⏸️ Not tested |
 | Cloud agents | git push/pull | ⏸️ Not tested |
+
+## Running Live Suites
+
+These are opt-in because they require real tmux sessions and, for backend smoke tests, installed/authenticated CLI agents.
+
+```bash
+AIP_RUN_LIVE_TMUX=1 python -m pytest -q tests/integration/test_live_core.py
+AIP_RUN_LIVE_TMUX=1 AIP_RUN_LIVE_CLI=1 python -m pytest -q tests/integration/test_live_backends.py
+```
 
 ## Known Limitations
 

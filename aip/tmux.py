@@ -21,6 +21,16 @@ class WindowInfo:
         return asdict(self)
 
 
+@dataclass
+class PaneMetrics:
+    history_size: int
+    pane_height: int
+
+    @property
+    def total_lines(self) -> int:
+        return self.history_size + self.pane_height
+
+
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
@@ -89,14 +99,33 @@ class TmuxController:
         *,
         lines: int | None = None,
         include_escape: bool = False,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> str:
         args = ["capture-pane", "-p", "-t", self._target(target)]
         if include_escape:
             args.append("-e")
-        if lines:
+        if lines is not None and start_line is not None:
+            raise ValueError("lines and start_line are mutually exclusive")
+        if start_line is not None:
+            args.extend(["-S", str(start_line)])
+        elif lines:
             args.extend(["-S", f"-{lines}"])
+        if end_line is not None:
+            args.extend(["-E", str(end_line)])
         result = self._run(*args)
         return result.stdout
+
+    def pane_metrics(self, target: str) -> PaneMetrics:
+        result = self._run(
+            "display-message",
+            "-p",
+            "-t",
+            self._target(target),
+            "#{history_size}\t#{pane_height}",
+        )
+        history_size, pane_height = result.stdout.strip().split("\t", 1)
+        return PaneMetrics(history_size=int(history_size), pane_height=int(pane_height))
 
     def send_keys(self, target: str, text: str, *, press_enter: bool = True) -> None:
         args = ["send-keys", "-t", self._target(target), text]

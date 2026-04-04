@@ -29,10 +29,13 @@ AIP/
 │   ├── test_tmux.py            # tmux controller tests (4 tests)
 │   ├── test_workspace.py       # Workspace tests (3 tests)
 │   └── integration/            # Integration tests
+│       ├── conftest.py         # Live tmux/CLI harness and fixtures
 │       ├── test_agent_lifecycle.py
 │       ├── test_concurrent_claiming.py
 │       ├── test_full_cycle.py
 │       ├── test_lease_expiry.py
+│       ├── test_live_backends.py
+│       ├── test_live_core.py
 │       ├── test_mcp_live.py
 │       ├── test_multi_backend_collab.py  # Multi-backend collaboration (8 tests)
 │       └── test_orchestrator_recovery.py
@@ -65,8 +68,8 @@ AIP/
 | Category | Count | Lines |
 |----------|-------|-------|
 | Core implementation | 10 files | ~1,070 lines |
-| Unit tests | 8 files | 194 tests |
-| Integration tests | 7 files | (included above) |
+| Unit tests | 8 files | 202 tests total with live suites skipped by default |
+| Integration tests | 10 files | (included above) |
 | Scripts | 3 files | ~150 lines |
 | Documentation | 5 files | ~2,600 lines |
 
@@ -85,7 +88,7 @@ Pure stdlib Python, zero external dependencies. Each module has a single respons
 
 ### Tests (`tests/`)
 - **Unit tests** (root level) — Fast, isolated, no tmux required
-- **Integration tests** (`integration/`) — Full workflows with real tmux sessions
+- **Integration tests** (`integration/`) — Scripted workflows plus opt-in live pytest suites for real tmux sessions and installed CLIs
 
 ### Scripts (`scripts/`)
 Executable shell scripts for common operations:
@@ -114,6 +117,12 @@ python -m pytest tests/
 
 # Integration tests only
 python -m pytest tests/integration/
+
+# Live tmux integration suite
+AIP_RUN_LIVE_TMUX=1 python -m pytest -q tests/integration/test_live_core.py
+
+# Live backend smoke suite
+AIP_RUN_LIVE_TMUX=1 AIP_RUN_LIVE_CLI=1 python -m pytest -q tests/integration/test_live_backends.py
 
 # Specific test
 python tests/integration/test_full_cycle.py
