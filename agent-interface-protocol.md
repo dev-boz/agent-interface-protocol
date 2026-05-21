@@ -1157,6 +1157,131 @@ When IMX is absent, the orchestrator uses its own routing heuristics (capability
 
 **Profile enforcement** — AIP shims and hook handlers should read `~/.imx/catalog/profiles/*.yaml` when present. The profile governs which tools the agent is allowed to call, which risk tiers it may operate in, and what guardrail scripts run on PreToolUse. When no IMX profile is configured, AIP falls back to permissive local defaults.
 
+## Worktree Helper
+
+Isolated mutation tasks — parallel coding agents, risky refactors, exploratory changes — should operate in a dedicated git worktree rather than the main working tree. AIP standardizes the provisioning pattern so that worktrees are consistently identified, isolated, and cleaned up.
+
+**Provisioning pattern:**
+
+```bash
+# Orchestrator provisions a worktree for a task
+TASK_ID="task-042"
+BASE_BRANCH="main"
+git worktree add .worktrees/$TASK_ID -b task/$TASK_ID $BASE_BRANCH
+```
+
+The worktree path `.worktrees/{task_id}/` is written into the task packet's `worktree.path` field. All agent writes, bash executions, and file edits for that task are scoped to this path. The agent's capability profile (from IMX) may enforce this by listing the worktree path as the only permitted write scope.
+
+**Cleanup policy** — the task packet carries a `worktree.cleanup_policy` field:
+
+- `on_success` — merge and remove after a successful outcome
+- `on_completion` — remove regardless of outcome
+- `retain` — keep for review; orchestrator or human removes manually
+
+The cleanup hook fires on Stop or on task outcome transition, reads the policy, and runs `git worktree remove` when appropriate.
+
+**Integration with task packets:**
+
+```json
+{
+  "task_id": "task-042",
+  "worktree": {
+    "path": ".worktrees/task-042",
+    "base_branch": "main",
+    "cleanup_policy": "on_success"
+  }
+}
+```
+
+Audit and telemetry use `worktree.path` to link tool calls, bash executions, and file writes to the correct staging area. IMX reads this field from route decisions to confirm isolation matches the task's risk tier.
+
+## Harness Control Seam
+
+IMX can direct AIP harnesses to take session-control actions — context compaction, model switching, session teardown — by writing control-intent files. AIP reads these files and acts on them without requiring a direct API call from IMX.
+
+**Control-intent location:** `~/.imx/state/control-intents/{session_id}.json`
+
+```json
+{
+  "session_id": "coder-1",
+  "intent": "compact",
+  "reason": "context_saturation",
+  "issued_by": "imx-orchestrator",
+  "issued_at": "2026-05-21T10:00:00Z",
+  "parameters": {
+    "target_tokens": 40000
+  }
+}
+```
+
+Supported intents:
+
+| intent | action |
+|---|---|
+| `compact` | trigger context compaction; emit dream candidate on completion |
+| `switch_model` | switch to the model named in `parameters.model` |
+| `pause` | suspend task queue consumption; remain alive |
+| `teardown` | graceful shutdown; emit final summary |
+
+**How AIP reads intents:** A recurring hook (e.g. PostToolUse or a cron-like pane) polls `~/.imx/state/control-intents/{session_id}.json`. If a new intent is present and its `issued_at` is within the session's active window, the hook executes the action and writes an acknowledgment:
+
+```json
+{ "session_id": "coder-1", "intent": "compact", "acknowledged_at": "...", "outcome": "dispatched" }
+```
+
+The acknowledgment is written to `workspace/events.jsonl` as an `intent_ack` event. Control intents are validated against the dispatching orchestrator's capability profile — a subordinate cannot write an intent to compact or terminate a peer session unless that orchestrator holds the required capability.
+
+## Heartbeat and Presence
+
+Long-running agents should emit presence signals so orchestrators and humans can distinguish a busy agent from a crashed one.
+
+**HEARTBEAT.md** — a short file written (overwritten) by the agent at regular intervals, typically every N tool calls or every M seconds via a PostToolUse hook:
+
+```
+agent: coder
+session_id: coder-1
+last_seen: 2026-05-21T10:04:37Z
+status: active
+current_task: task-042
+tokens_consumed: 48200
+```
+
+Written to `workspace/status/HEARTBEAT-{agent}.md` alongside the existing status JSON. Unlike `status/{agent}.json` (which carries capability declarations), the heartbeat is a liveness signal only.
+
+**Presence files** — agents that support it write `workspace/status/{agent}.present` (empty file) on start and remove it on clean shutdown. A presence file that exists with a stale heartbeat indicates a crash.
+
+**Orchestrator use:** The orchestrator's health check reads heartbeat timestamps. Agents with a heartbeat older than a configurable staleness threshold (e.g. 120s) are treated as unresponsive; the orchestrator may re-queue their claimed tasks.
+
+**Cron/event wakeups** — for dormant agents (waiting on human input, rate-limited, or holding a lease), heartbeat emission may stop. Orchestrators should interpret a missing heartbeat file as "dormant or stopped," not necessarily "crashed." The distinction is: crash = stale heartbeat file still present; clean stop = heartbeat file removed.
+
+## Contamination-Aware Handoffs
+
+When one agent hands off a task to another, the handoff packet must propagate contamination state and increment `chain_depth`. AIP enforces this at the hook boundary.
+
+**`chain_depth` semantics:** Every hop through an agent boundary increments `chain_depth` by 1. An orchestrator that writes a task packet from a human prompt starts at depth 0. The first agent that processes and re-dispatches the task produces a handoff packet at depth 1. Depth 2 agents are two hops from the human instruction. IMX uses chain_depth to decay confidence (§11.6 of IMX spec).
+
+**Handoff packet requirements** (enforced by PreToolUse hook before any EXTERNAL dispatch):
+
+1. `provenance.chain_depth` must equal the incoming task packet's `chain_depth` + 1
+2. `contamination_risk.sanitized` must be `true` or `contamination_risk.untrusted_sources` must be explicitly listed
+3. `outcome` must be set
+
+**Hook enforcement pattern:**
+
+```bash
+#!/bin/bash
+# pre-handoff-guard — runs as PreToolUse when tool is write_handoff_packet
+PACKET="$1"
+INCOMING_DEPTH=$(jq '.provenance.chain_depth' workspace/tasks/current.json)
+OUTGOING_DEPTH=$(jq '.provenance.chain_depth' "$PACKET")
+if [ "$OUTGOING_DEPTH" -ne $(( INCOMING_DEPTH + 1 )) ]; then
+  echo "DENY: chain_depth not incremented correctly" >&2
+  exit 1
+fi
+```
+
+Handoff packets that fail validation are written to `workspace/gates/{handoff_id}-rejected.json` with the rejection reason, not dispatched. The agent must resolve the contamination or depth mismatch before the handoff proceeds.
+
 ## Relation to IMX and gitmem
 
 AIP is the **execution substrate** of the IMX/AIP/gitmem triad. Its responsibility boundary is process lifecycle, tmux orchestration, hook normalization, task transport, event emission, and agent coordination. It does not own routing policy (IMX), durable memory (gitmem), or scoring (IMX).
