@@ -48,6 +48,12 @@ workspace/
 │   ├── claimed/        ← in-progress (agent-name prefixed)
 │   ├── done/           ← completed
 │   └── failed/         ← move back to pending/ to retry
+├── transcripts/        ← normalized session transcripts (jsonl per session)
+│   └── {session_id}.jsonl
+├── reviews/            ← shared review files for multi-agent review patterns
+│   └── {task_id}/      ← proposal.md, reviewer-*.md, resolution.md, decision.json
+├── artifacts/          ← task output artifacts
+│   └── demo/           ← evidence artifacts for EXTERNAL-tier actions
 ├── events.jsonl        ← append-only event log (orchestrator's dashboard)
 └── agent_tree.json     ← live agent hierarchy (who spawned whom)
 ```
@@ -199,6 +205,37 @@ In practice, Tier 3 may never be needed. Every known CLI agent either has native
 | Any future CLI | 1 or 2 | Native hooks or shim profile | Add a YAML profile |
 
 **Every CLI agent is now protocol-compliant. The shim eliminates all gaps.**
+
+#### Hook Guard Patterns
+
+Beyond status reporting, hooks are the right place for safety guards, redaction, and human-escalation signals. Because hooks fire at the tier 1 / tier 2 / tier 3 boundary before any agent context is consumed, they are the cheapest interception point.
+
+**Dangerous command interceptors** — PreToolUse hooks can block or quarantine known-dangerous bash patterns before execution. Patterns live in `.aip/block`:
+
+```yaml
+# .aip/block — list of dangerous command patterns; one regex per line
+rm -rf .*
+git push --force
+DROP TABLE
+> /dev/sda
+```
+
+The hook script checks the incoming command against these patterns. On match: emit a `DENY` event to `events.jsonl`, inject `n` via aip-shim (or return non-zero exit code for native hooks), and optionally write to `workspace/status/{agent}.json` with `{"status": "blocked", "reason": "dangerous_command"}`.
+
+**Redaction hooks** — PostToolUse and SessionEnd hooks can run a redaction pass on exported summaries and transcripts before they land in `workspace/`. The redaction script receives the file path and rewrites it in place. Secrets, tokens, internal hostnames, and PII are removed before any other agent reads the output.
+
+```bash
+# example hook — runs after export_summary writes a file
+aip-redact workspace/summaries/coder-0317-1425.md
+```
+
+**Human escalation shims** — when a PreToolUse event matches a pattern that requires human approval (e.g. EXTERNAL risk tier, production writes), the shim can pause the agent and write a human-gate record:
+
+```jsonl
+{"ts":"...","agent":"coder","event":"human_gate","tool":"bash","command":"git push origin main","requires_approval":true,"gate_ref":"workspace/gates/gate-coder-001.json"}
+```
+
+The agent stays blocked until a human (or the orchestrator with appropriate capabilities) writes `approved: true` to the gate file and the shim unblocks it.
 
 ### MCP Tools (Intentional — Requires Agent Context)
 
@@ -984,6 +1021,180 @@ Porting from existing cli-agent-interface-protocol dashboard work. Second-order 
 - **Remote**: SSH wraps everything transparently
 - **IDE agents**: VSIX extension auto-integrates any VS Code-based IDE (Cursor, Windsurf, Cline, Copilot)
 - **Cloud agents**: git push/pull workspace, watcher pane bridges events back to local log
+
+## Workflow Templates
+
+Methodology repos, role-prompt libraries, and plan files map directly to repo-local workflow templates. These are the file-first equivalent of LangGraph / CrewAI workflow definitions.
+
+A workflow template lives in the repo alongside the code it governs:
+
+```text
+.aip/workflows/
+├── review-cycle.yaml       ← step definitions, roles, exit conditions
+├── feature-branch.yaml
+└── release-checklist.yaml
+```
+
+Minimal workflow template format:
+
+```yaml
+name: review-cycle
+roles:
+  implementer:
+    task_class: implementation
+    capabilities: [edit_file, bash, git_commit]
+  reviewer:
+    task_class: code_review
+    capabilities: [read_file, comment]
+steps:
+  - id: implement
+    role: implementer
+    exit_when: tests pass
+    idempotency_key: review-cycle:implement
+  - id: review
+    role: reviewer
+    depends_on: [implement]
+  - id: revise
+    role: implementer
+    depends_on: [review]
+    max_iterations: 3
+    exit_when: reviewer approves
+```
+
+The runner may be a script, orchestrator agent, or harness — the state machine lives in files, not in the runner.
+
+**Workflow state** is tracked in `workspace/tasks/`:
+
+```text
+workspace/tasks/pending/review-cycle:implement.md   ← before claim
+workspace/tasks/claimed/coder-review-cycle:implement.md ← claimed
+workspace/tasks/done/review-cycle:implement.md      ← done, next step unblocked
+```
+
+**Role prompts** are Markdown files in `.aip/roles/` — same format as IMX `~/.imx/catalog/roles/*.md`. A role prompt defines the agent's instruction set, scope, and constraints for that workflow position:
+
+```markdown
+---
+role_id: implementer
+task_classes: [implementation, debugging]
+allowed_tools: [read_file, edit_file, bash, git_commit]
+---
+# Implementer
+
+Make minimal, tested changes. Prefer worktrees for mutation tasks.
+Read the design from workspace/summaries/architect-*.md before starting.
+```
+
+**DESIGN.md** is a repo-level design contract for agents. Place it at the project root or subdirectory. Any agent working in that directory reads it before mutations that touch stable interfaces. DESIGN.md is the stable-invariants companion to AGENTS.md:
+
+```markdown
+# DESIGN.md
+
+## Stable Interface Invariants
+
+- /api/v1/* is public and cannot change signatures without a major version bump
+- auth module: session_id is always UUID v4, never auto-increment
+- database: all timestamps are UTC; timezone conversion happens at the API layer
+```
+
+Agents encountering DESIGN.md treat listed invariants as hard constraints. Violations should surface as blocked tasks, not silent diffs.
+
+## Compaction Hooks
+
+Compaction — when a CLI compresses its context to free token budget — is a natural stop-time event with useful properties: a complete bounded work unit has just ended, and a summary already exists.
+
+AIP treats compaction as a moment to emit memory candidates and session snapshots.
+
+**Compaction hook pattern:**
+
+When a CLI fires its compaction event (e.g. Claude Code's `/compact` or Stop hook), the hook handler should:
+
+1. Write a timestamped transcript snapshot to `workspace/transcripts/{session_id}.jsonl`
+2. Export a compaction-boundary summary to `workspace/summaries/{agent}-compact-{ts}.md`
+3. Emit a compaction event to `events.jsonl`:
+   ```jsonl
+   {"ts":"...","agent":"coder","event":"compaction","session_id":"coder-1","summary_ref":"summaries/coder-compact-0317-1500.md","tokens_before":180000,"trigger":"context_limit"}
+   ```
+4. Optionally write a dream candidate to `workspace/dream-candidates/`:
+   ```jsonl
+   {"ts":"...","agent":"coder","session_id":"coder-1","trigger":"compaction","summary_ref":"summaries/coder-compact-0317-1500.md","candidate_type":"session_distillation"}
+   ```
+
+Dream candidates are picked up by gitmem's Dream pipeline for consolidation into durable memory. This is the primary bridge between AIP's ephemeral execution layer and gitmem's durable knowledge store.
+
+**Session transcripts** — `workspace/transcripts/{session_id}.jsonl` is a normalized transcript of agent actions and outputs, one record per turn. It differs from the raw pane buffer (which is for live streaming) and from summaries (which are distilled). Transcripts are the auditable middle layer:
+
+```jsonl
+{"ts":"...","session_id":"coder-1","turn":1,"agent":"coder","kind":"tool","tool":"edit_file","file":"auth.py","outcome":"success"}
+{"ts":"...","session_id":"coder-1","turn":2,"agent":"coder","kind":"output","summary":"Implemented OAuth session token validation"}
+```
+
+## Route-Request Seam
+
+Before spawn or dispatch, the orchestrator (or the aip-shim) may consult IMX for a routing recommendation. This seam is optional — AIP works without IMX — but when IMX is present, it provides budget-aware, capability-aware, and policy-aware model selection.
+
+**How it works:**
+
+1. Orchestrator writes a route-request to `workspace/route-requests/{task_id}.json`:
+   ```json
+   {
+     "task_id": "task-042",
+     "task_class": "implementation",
+     "risk_tier": "LOCAL",
+     "budget_max_usd": 2.00,
+     "capabilities_required": ["edit_file", "bash", "git_commit"],
+     "current_agents": ["coder", "reviewer"]
+   }
+   ```
+2. IMX reads the request, evaluates candidates, and writes `workspace/route-decisions/{task_id}.json`
+3. Orchestrator reads the decision and spawns accordingly
+
+When IMX is absent, the orchestrator uses its own routing heuristics (capability checks, status files, interest maps). The seam exists; IMX is optional.
+
+**Profile enforcement** — AIP shims and hook handlers should read `~/.imx/catalog/profiles/*.yaml` when present. The profile governs which tools the agent is allowed to call, which risk tiers it may operate in, and what guardrail scripts run on PreToolUse. When no IMX profile is configured, AIP falls back to permissive local defaults.
+
+## Relation to IMX and gitmem
+
+AIP is the **execution substrate** of the IMX/AIP/gitmem triad. Its responsibility boundary is process lifecycle, tmux orchestration, hook normalization, task transport, event emission, and agent coordination. It does not own routing policy (IMX), durable memory (gitmem), or scoring (IMX).
+
+**What AIP provides to IMX:**
+
+- `workspace/tasks/` — the dispatch surface for file-backed tasks; IMX writes task packets, AIP agents claim them
+- `workspace/events.jsonl` — the live execution event stream; IMX maps these events into routing telemetry
+- `workspace/summaries/` and `workspace/transcripts/` — evidence sources for IMX telemetry and gitmem distillation
+- `workspace/status/{agent}.json` — live capability and health signals for routing decisions
+- `workspace/route-requests/` and `workspace/route-decisions/` — the IMX consultation seam
+- Hook events (PreToolUse, PostToolUse, human gates) — inputs to IMX gate decisions and audit trails
+
+**What AIP provides to gitmem:**
+
+- `workspace/dream-candidates/` — compaction-boundary session distillations ready for Dream ingestion
+- `workspace/summaries/` — task-boundary output artifacts; Dream pipeline harvests these for memory candidates
+- `workspace/transcripts/{session_id}.jsonl` — normalized session records for memory consolidation
+
+**What AIP consumes from IMX:**
+
+- `~/.imx/catalog/profiles/*.yaml` — capability profiles governing tool allowlists and risk tiers
+- `~/.imx/state/approvals/{task_id}.json` — human approval records for EXTERNAL-tier gating
+- Route decisions from `workspace/route-decisions/` when IMX is consulted before spawn
+
+**What AIP consumes from gitmem:**
+
+- Procedures and CONVENTIONS.md files injected into agent context at spawn time or via pre-tool guidance
+- Role cards from `~/.imx/catalog/roles/*.md` or equivalent gitmem namespaces for agent instruction sets
+
+**Contract boundary:**
+
+| concern | owner |
+|---|---|
+| Process lifecycle, tmux sessions, hook normalization | AIP |
+| Task queue, atomic claiming, interest maps, event log | AIP |
+| Routing decisions, capability scoring, budget gates | IMX |
+| Durable facts, procedures, memory governance | gitmem |
+| Profile enforcement, risk tier gates, telemetry | IMX |
+| Dream consolidation, knowledge promotion | gitmem |
+
+AIP does not call IMX or gitmem APIs. Integration is file-to-file: AIP writes files that IMX and gitmem read, and vice versa. There are no required network calls, no SDKs, no shared process state.
 
 ## Related Projects (Separate Scope)
 
