@@ -54,6 +54,10 @@ workspace/
 │   └── {task_id}/      ← proposal.md, reviewer-*.md, resolution.md, decision.json
 ├── artifacts/          ← task output artifacts
 │   └── demo/           ← evidence artifacts for EXTERNAL-tier actions
+├── dream-candidates/   ← compaction-boundary distillations for gitmem Dream ingestion
+├── route-requests/     ← IMX route-request records (written before spawn/dispatch)
+├── route-decisions/    ← IMX route-decision records (written after routing)
+├── gates/              ← human-gate records for EXTERNAL-tier approvals
 ├── events.jsonl        ← append-only event log (orchestrator's dashboard)
 └── agent_tree.json     ← live agent hierarchy (who spawned whom)
 ```
