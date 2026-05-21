@@ -210,6 +210,41 @@ In practice, Tier 3 may never be needed. Every known CLI agent either has native
 
 **Every CLI agent is now protocol-compliant. The shim eliminates all gaps.**
 
+### Runtime Bridge Adapter Templates
+
+Every harness integrates with AIP through a **local bridge file**, not through a shared gateway service and not through a vendor SDK. The bridge exists to map one CLI's native hook names, stdio relay command, and task/status paths onto AIP's existing filesystem surface: `workspace/events.jsonl`, `workspace/tasks/`, `workspace/status/`, and `workspace/agent_tree.json`. Those files remain authoritative. A centralized MCP gateway would quietly become a second orchestrator with its own retries, buffering rules, and hidden state. AIP explicitly rejects that pattern. Bridge configs are therefore thin, repo-local, and replaceable: Claude Code, Codex CLI, Gemini CLI, OpenCode, or any future harness can each load a different template, but all of them write into the same file truth.
+
+The template may be a `.mcp.json` snippet, a harness-specific hook config, or a small YAML bridge descriptor checked into `.aip/bridges/`. The important constraint is that the bridge must not become authoritative. If the bridge disappears, the orchestrator can still reconstruct state from the workspace. If the bridge is wrong, fix or replace the file; do not add a broker. This keeps orchestration decentralized and preserves AIP's core rule that the runtime is visible and editable with ordinary files.
+
+```json
+{
+  "mcpServers": {
+    "aip": {
+      "command": "aip-bridge",
+      "args": ["stdio", "--workspace", "./workspace", "--agent", "coder"],
+      "env": {
+        "AIP_HARNESS": "codex-cli",
+        "AIP_BRIDGE_CONFIG": ".aip/bridges/codex-cli.yaml"
+      }
+    }
+  }
+}
+```
+
+```yaml
+# .aip/bridges/codex-cli.yaml
+harness: codex-cli
+event_map:
+  session_start: SessionStart
+  pre_tool_use: PreToolUse
+  post_tool_use: PostToolUse
+  session_end: SessionEnd
+surfaces:
+  event_log: workspace/events.jsonl
+  task_root: workspace/tasks
+  status_file: workspace/status/coder.json
+```
+
 #### Hook Guard Patterns
 
 Beyond status reporting, hooks are the right place for safety guards, redaction, and human-escalation signals. Because hooks fire at the tier 1 / tier 2 / tier 3 boundary before any agent context is consumed, they are the cheapest interception point.
@@ -512,6 +547,54 @@ blocked_by: [task-040, task-041]
 ```
 
 **Task dependencies** — the optional `blocked_by` field lists task IDs that must complete before this task becomes claimable. Tasks with unresolved dependencies stay in `pending/` but agents skip them. When a blocking task moves to `done/`, the orchestrator (or any agent checking the queue) evaluates whether blocked tasks are now unblocked. No new tool needed — the queue logic just checks `blocked_by` against `done/` before allowing a claim.
+
+### Task-Local Workspaces and Audit Logs
+
+AIP durability does not come from Kafka topics, hosted workflow engines, or a control-plane database. Those systems solve durability in the wrong substrate. In AIP, durable coordination is already provided by two filesystem primitives: append-only JSONL for history and atomic directory moves for ownership transfer. When a task needs stronger isolation than a single markdown packet, it MAY own a dedicated sub-workspace at `workspace/tasks/{task_id}/`. That directory is the task's local execution tree: it holds the task description, task-local audit log, artifacts, and scratch files, while the queue state remains visible through the normal `pending/`, `claimed/`, `done/`, and `failed/` directories.
+
+This strips the useful part of inbox/drain-style systems — directory isolation — without adopting their hidden queue semantics. The global `workspace/events.jsonl` remains the system-wide ledger. The task-local `audit.jsonl` is the high-resolution record for that one unit of work. A crash does not require replaying a broker; the next orchestrator reads the task directory and the append-only audit file. A worker that wants a private inbox or drain folder can create it inside the task subtree, but that pattern stays local to the task rather than becoming a second protocol.
+
+```text
+workspace/tasks/task-042/
+├── task.md
+├── plan.yaml
+├── audit.jsonl
+├── artifacts/
+│   └── test-report.txt
+└── scratch/
+    └── notes.md
+```
+
+```jsonl
+{"ts":"2026-05-21T10:00:00Z","task_id":"task-042","event":"claimed","agent":"coder"}
+{"ts":"2026-05-21T10:04:11Z","task_id":"task-042","event":"tool","tool":"pytest","exit_code":1}
+```
+
+### Plan Files and DAG Decomposition
+
+When a task has internal structure, that structure MUST be written down as a file, not inferred by a planner service. AIP adopts explicit DAG decomposition through `workspace/tasks/{task_id}/plan.yaml`. The file describes the child nodes, dependencies, expected outputs, and any designated leaf tools. An orchestrator may author this file, and a human may edit it mid-flight, but no planning engine owns it. The plan file is the truth. The queue is merely the execution projection of that truth: ready nodes appear as normal files in `pending/`, active nodes move to `claimed/`, and counts in those directories become the read-only kanban view.
+
+This keeps decomposition inspectable and reversible. If the orchestrator makes a bad split, the fix is a git diff to `plan.yaml`, not a control-plane mutation hidden in a database. It also means agents can recover from failure with ordinary file reads. To answer "what remains?", read the plan file and compare it with directory state. To render a board, count files; do not store board state separately. Planning remains explicit, local, and files-first.
+
+```yaml
+# workspace/tasks/task-042/plan.yaml
+task_id: task-042
+goal: ship oauth login
+nodes:
+  - id: design
+    outputs: [artifacts/design-notes.md]
+  - id: backend
+    depends_on: [design]
+    leaf_tools: [pytest]
+    outputs: [artifacts/backend.patch]
+  - id: frontend
+    depends_on: [design]
+    leaf_tools: [npm-test]
+    outputs: [artifacts/frontend.patch]
+  - id: integration
+    depends_on: [backend, frontend]
+    leaf_tools: [pytest, npm-test]
+```
 
 ### Push vs Pull
 
@@ -1017,6 +1100,22 @@ This is a wall of monitors for AI agents. You see exactly what each agent is doi
 
 Porting from existing cli-agent-interface-protocol dashboard work. Second-order priority — the core system works without it.
 
+### Read-Only Operator Views
+
+The operator surface is a **viewer**, not a control plane. A tmux dashboard, border colors, title bars, or a multi-pane observer script may render the system however it likes, but it MUST derive that display from `workspace/status/*.json`, `workspace/status/*-activity.json`, `workspace/agent_tree.json`, and the current tmux panes. It MUST NOT write task state, claim work, change agent status, or become the only place from which a human can understand the run. If the viewer disappears, the system continues unchanged because all state already lives in files and panes.
+
+This matters because dashboards drift toward authority. The moment a viewer starts mutating state, operators begin trusting the UI more than the workspace, and "files are truth" is lost. AIP keeps the viewer passive. Status colors and pane titles are simply projections: green for `running`, amber for `needs-input`, red for `stalled`, blue for `done`. The same information is still inspectable with `cat workspace/status/*.json` and `tmux capture-pane`. The observer layout may be helpful, even beautiful, but it is downstream of the protocol.
+
+```bash
+STATE=$(jq -r '.state' workspace/status/coder-activity.json)
+COLOR=green
+[ "$STATE" = "needs-input" ] && COLOR=yellow
+[ "$STATE" = "stalled" ] && COLOR=red
+[ "$STATE" = "done" ] && COLOR=blue
+tmux select-pane -t aip:coder -T "coder [$STATE]"
+tmux select-pane -t aip:coder -P "fg=$COLOR"
+```
+
 ## Platform Notes
 
 - **Linux/Mac**: works natively
@@ -1195,6 +1294,24 @@ The cleanup hook fires on Stop or on task outcome transition, reads the policy, 
 
 Audit and telemetry use `worktree.path` to link tool calls, bash executions, and file writes to the correct staging area. IMX reads this field from route decisions to confirm isolation matches the task's risk tier.
 
+## CLI Leaf Tool Conformance
+
+The lowest execution tier in AIP is a native CLI command, not a long-lived agent session. Linters, formatters, test runners, screenshot/computer-use drivers, and other bounded command-line tools are the right leaf shape because they have a finite invocation, a predictable exit code, and output that can be captured without interpretation drift. AIP adapters SHOULD prefer these tools whenever the work does not require interactive reasoning. Sandbox lifecycle is not part of this layer; isolation is already handled by the worktree helper plus the task's restricted profile.
+
+What matters is conformance. A harness MUST test a candidate leaf tool before treating it as protocol-safe. The conformance record is a file declaring how to probe the tool, which exit codes mean success or retry, and how much output may be passed through before the runner truncates or redirects to an artifact file. A tool that requires a pager, never terminates, or emits ambiguous success conditions is not a leaf tool in AIP terms. It should be fronted by an agent or shim instead. This keeps the execution substrate boring: ordinary CLIs at the leaves, ordinary files for their records.
+
+```yaml
+# .aip/tools/ruff-format.yaml
+tool_id: ruff-format
+command: ["ruff", "format", "--check", "."]
+probe: ["ruff", "--version"]
+success_exit_codes: [0]
+retryable_exit_codes: [1]
+timeout_seconds: 30
+max_stdout_lines: 200
+write_stdout_to: workspace/tasks/task-042/artifacts/ruff-format.txt
+```
+
 ## Harness Control Seam
 
 IMX can direct AIP harnesses to take session-control actions — context compaction, model switching, session teardown — by writing control-intent files. AIP reads these files and acts on them without requiring a direct API call from IMX.
@@ -1253,6 +1370,38 @@ Written to `workspace/status/HEARTBEAT-{agent}.md` alongside the existing status
 **Orchestrator use:** The orchestrator's health check reads heartbeat timestamps. Agents with a heartbeat older than a configurable staleness threshold (e.g. 120s) are treated as unresponsive; the orchestrator may re-queue their claimed tasks.
 
 **Cron/event wakeups** — for dormant agents (waiting on human input, rate-limited, or holding a lease), heartbeat emission may stop. Orchestrators should interpret a missing heartbeat file as "dormant or stopped," not necessarily "crashed." The distinction is: crash = stale heartbeat file still present; clean stop = heartbeat file removed.
+
+### Derived Activity State
+
+High-level activity is a derived read model, not something agents get to invent about themselves. AIP computes activity from the files it already has: heartbeat freshness, whether the agent currently owns a claimed task, and whether the latest task or gate record indicates blocked progress. The derived result is written to `workspace/status/{agent}-activity.json` with one of `running`, `needs-input`, `stalled`, `idle`, or `done`. This file is useful precisely because it is disposable. If it is deleted or suspected stale, the orchestrator recomputes it from `HEARTBEAT-{agent}.md`, `workspace/tasks/claimed/`, `workspace/gates/`, and `workspace/events.jsonl`.
+
+This keeps dashboards and policy checks cheap without inventing a new control-plane truth. `running` means the heartbeat is fresh and at least one claim is active. `needs-input` means the claim is active but a gate, approval prompt, or explicit wait condition is open. `stalled` means the claim is still present but the heartbeat is older than the staleness threshold. `idle` means the agent is alive with no active claim. `done` is a terminal projection written after the last claimed task exits cleanly. Consumers should treat this file as a cache over primary evidence, never as the only record.
+
+```json
+{
+  "agent": "coder",
+  "state": "needs-input",
+  "derived_from": {
+    "heartbeat": "workspace/status/HEARTBEAT-coder.md",
+    "claim": "workspace/tasks/claimed/coder-task-042.md",
+    "gate": "workspace/gates/gate-coder-001.json"
+  },
+  "derived_at": "2026-05-21T10:05:00Z"
+}
+```
+
+### Resource Locks
+
+Some resources are shared even when tasks are isolated: a browser profile, a deployment target, a hardware device, a staging database, or a single writable cache directory. AIP coordinates these with plain lock files at `workspace/locks/{resource}.lock`. Acquisition is an atomic file create; release is file removal. The lock file content is minimal and human-readable, typically the owning `agent_id`, the `task_id`, and `claimed_at`. No database lease table, RPC lock manager, or sidecar service is needed because the filesystem already gives AIP the only guarantee it needs: one successful creator.
+
+Locks are reclaimed with the same liveness model as tasks. If the owning agent's heartbeat is stale beyond the configured threshold, the orchestrator MAY treat the lock as abandoned, append a reclaim event to `events.jsonl`, and remove the file before reassigning the resource. This ties lock recovery to the same observable substrate as task recovery. Operators debugging contention can simply read the lock file and the owner's heartbeat rather than spelunking a hidden state machine.
+
+```text
+# workspace/locks/staging-db.lock
+agent_id: deployer
+task_id: task-051
+claimed_at: 2026-05-21T10:07:14Z
+```
 
 ## Contamination-Aware Handoffs
 
