@@ -676,6 +676,135 @@ Now the orchestrator sees cloud agent completions in the same event log as local
 
 They're contractors, not managed workers. The orchestrator can leave work for them and check results, but can't watch them in real time, can't kill them, can't redirect them mid-task. Useful for slow background work — big refactors, extensive test suites, migrations — where you don't need real-time feedback.
 
+## Git/SSH Bridge Patterns
+
+AIP agent sessions can be projected onto remote hosts or CI environments via two bridge patterns. Neither requires a persistent daemon.
+
+### SSH Remote Execution Bridge
+
+The pattern: tmux session on remote host + local relay pane that streams events over SSH.
+
+```text
+.aip/bridges/ssh-remote.yaml
+```
+
+```yaml
+harness: ssh-remote
+transport: ssh
+host: "{{SSH_HOST}}"
+tmux_session: aip-remote
+event_map:
+  session_start: SessionStart
+  pre_tool_use: PreToolUse
+  post_tool_use: PostToolUse
+  session_end: SessionEnd
+surfaces:
+  event_log: workspace/events.jsonl
+  task_root: workspace/tasks
+  status_file: workspace/status/remote.json
+init_script: ".aip/bridges/ssh-init.sh"
+```
+
+The init script is pulled to the remote host at session start and mounts the workspace directory over SSHFS or syncs it via rsync. Remote workloads survive connection drops because they run in tmux on the remote host; reconnection resumes the existing session.
+
+### Worktree-Branch-Session Mapping
+
+When orchestrating multiple parallel coding agents, map each agent to:
+- a dedicated git worktree (`git worktree add .worktrees/{task_id} -b {branch}`)
+- a dedicated tmux window or session
+- a dedicated task namespace under `workspace/tasks/{task_id}/`
+
+The mapping is captured in a local index file:
+
+```text
+workspace/agent-map.json
+```
+
+```json
+{
+  "schema_version": "0.6",
+  "agents": [
+    {
+      "agent_id": "coder-1",
+      "task_id": "task-042",
+      "worktree": ".worktrees/task-042",
+      "branch": "task/oauth-login",
+      "tmux_session": "aip",
+      "tmux_window": 2
+    }
+  ]
+}
+```
+
+Merge requests and PR creation are leaf-tool steps declared in `.aip/tools/gh-pr.yaml`, not platform hooks. The bridge pattern keeps orchestration as inspectable files; the git and SSH layers are standard tools, not custom protocols.
+
+## Memory Adapters
+
+When a specific harness (Claude Code, Kiro, Codex CLI) needs its own persistent memory surface, the right shape is a client-specific adapter — not a shared memory service.
+
+A memory adapter is a bridge YAML plus a local SQLite database:
+
+```text
+.aip/bridges/memory-{harness}.yaml
+~/.aip/memory/{harness}.db          # ephemeral local cache
+```
+
+Rules:
+- the SQLite database is a derived cache, not the canonical store — canonical source is gitmem or local files
+- the adapter writes session summaries and extracted facts to gitmem on session end
+- zero cloud, zero API keys — the adapter reads only local files and the local DB
+- the DB schema is stable and versioned in `.aip/bridges/memory-{harness}.schema.sql`
+
+Adapter YAML:
+
+```yaml
+harness: codex-cli
+memory_db: "~/.aip/memory/codex.db"
+canonical_source: "~/.gitmem/memory/"
+sync_on: [session_end, pre_compact]
+max_cache_mb: 50
+schema_version: "1"
+```
+
+On `session_end`, the adapter extracts a summary and appends it to `~/.gitmem/local/sessions/` as a raw session file — letting the dream pipeline govern promotion rather than the adapter.
+
+## Context Adapters
+
+A context adapter applies inclusion/omission rules to decide what goes into an agent's context before a task starts. The rules are local files, not runtime logic.
+
+```text
+.aip/context/{task_class}.yaml
+```
+
+```yaml
+task_class: code-review
+budget_tokens: 8000
+include:
+  - source: gitmem
+    query: "facts about {{files_changed}}"
+    max_tokens: 2000
+  - source: workspace/tasks/{{task_id}}/plan.yaml
+    always: true
+  - source: "{{changed_files}}"
+    max_tokens: 4000
+    strategy: tail          # most recent lines first
+exclude:
+  - pattern: "local/private/**"
+  - pattern: "local/secret/**"
+omit_if_over_budget:
+  - source: gitmem
+    priority: low
+```
+
+The adapter emits a bounded context pack to:
+```text
+workspace/context/{task_id}.md
+```
+
+This pack is injected once at task start and is the only permitted injection surface for that task. Over-injection from unbounded dynamic recall is prevented by the token budget in the adapter config.
+
+Tool output from sandboxed steps is captured to `workspace/tasks/{task_id}/outputs/{step}.txt` and may be included in a subsequent context pack — it is never injected raw into the running context.
+
 ## Agent Lifecycle
 
 ### Spawn
