@@ -1,0 +1,40 @@
+schema_version: "0.6"
+task_class: implementation
+description: >
+  Context adapter for implementation tasks. Declares which context sources
+  AIP should inject before handing work to an implementer agent.
+
+# Ordered list of context sources to inject (highest priority first).
+sources:
+  - kind: gitmem_procedures
+    query:
+      task_class: implementation
+    max_results: 3
+    position: top
+    description: "Relevant procedures from durable memory"
+
+  - kind: conventions
+    files:
+      - CONVENTIONS.md
+      - AGENTS.md
+      - CLAUDE.md
+    position: top
+    description: "Project conventions and agent instructions"
+
+  - kind: attention_refresh
+    trigger: session_length_gt_50_turns
+    description: "Re-inject key facts after long sessions to prevent drift"
+
+  - kind: role_card
+    profile: implementer
+    position: system
+    description: "Implementer role card from ~/.imx/catalog/roles/implementer.md"
+
+# Context budget: how many tokens to reserve for injected context.
+max_context_tokens: 16384
+
+# Whether to inject the task packet as structured context.
+inject_task_packet: true
+
+# Whether to run context lint before injecting.
+lint_before_inject: true

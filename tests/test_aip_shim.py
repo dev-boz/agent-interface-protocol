@@ -13,6 +13,7 @@ from aip.aip_shim import (
     BlockRule,
     ShimProfile,
     _parse_simple_yaml,
+    load_block_rules_from_file,
     load_profile,
 )
 from aip.cli import main
@@ -243,3 +244,22 @@ def test_shim_list_profiles_cli(capsys, tmp_path):
     # Spot-check tiers
     assert profiles["amp"]["tier"] == "intercept"
     assert profiles["claude-code"]["tier"] == "native"
+
+
+# ---------------------------------------------------------------------------
+# load_block_rules_from_file
+# ---------------------------------------------------------------------------
+
+
+def test_load_block_rules_from_file_parses_patterns(tmp_path):
+    block_file = tmp_path / "block"
+    block_file.write_text("# comment\n\nrm -rf /\ngit push --force\n")
+    rules = load_block_rules_from_file(block_file)
+    assert len(rules) == 2
+    assert rules[0].pattern.search("rm -rf /tmp")
+    assert rules[1].pattern.search("git push --force origin main")
+
+
+def test_load_block_rules_from_file_missing_file(tmp_path):
+    rules = load_block_rules_from_file(tmp_path / "nonexistent")
+    assert rules == []

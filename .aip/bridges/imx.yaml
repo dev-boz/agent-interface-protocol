@@ -1,0 +1,37 @@
+schema_version: "0.6"
+bridge_id: imx
+description: >
+  Bridge adapter for IMX (Inference Mesh Exchange) integration. Defines how
+  AIP workspace connects to IMX routing, telemetry, and governance.
+
+# Where AIP writes route requests for IMX to resolve.
+route_requests_dir: workspace/route-requests/
+
+# Where IMX writes route decisions for AIP to consume.
+route_decisions_dir: workspace/route-decisions/
+
+# IMX catalog path (for profile and role card lookups).
+imx_catalog_dir: "~/.imx/catalog/"
+
+# IMX telemetry path (for task outcome recording).
+imx_telemetry_dir: "~/.imx/telemetry/"
+
+# IMX dream-trigger pipe.
+dream_triggers_path: "~/.imx/state/dream-triggers.jsonl"
+
+# IMX control-intents directory (for harness-controlling-harness topology).
+control_intents_dir: "~/.imx/state/control-intents/"
+
+# AIP events to forward to IMX telemetry.
+forward_events:
+  - status
+  - task
+  - export
+  - heartbeat
+  - route_request
+
+# Whether AIP should write IMX task packets for dispatched tasks.
+emit_task_packets: true
+
+# Schema version for emitted packets.
+packet_schema_version: "0.6"

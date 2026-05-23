@@ -1,0 +1,35 @@
+schema_version: "0.6"
+bridge_id: gitmem
+description: >
+  Bridge adapter for gitmem/umx integration. Defines how AIP workspace
+  artifacts flow into gitmem for durable memory storage and retrieval.
+
+# Where AIP exports summaries that gitmem should ingest.
+summary_source: workspace/summaries/
+
+# Where AIP writes dream candidates for gitmem Dream pipeline.
+dream_candidates_source: workspace/dream-candidates/
+
+# gitmem CLI command for storing a fact.
+store_command: "umx store --scope project --strength 3"
+
+# gitmem CLI command for retrieving procedures by task class.
+retrieve_command: "umx procedures --task-class {task_class} --limit {limit}"
+
+# gitmem CLI command for running dream ingestion of AIP candidates.
+dream_ingest_command: "umx dream --source workspace/dream-candidates/ --trigger-file {trigger_file}"
+
+# Whether to auto-promote large_task_completion summaries to gitmem.
+auto_promote_summaries: false
+
+# Minimum encoding strength for auto-promoted facts.
+min_promotion_strength: 3
+
+# Events in events.jsonl that trigger a dream candidate write.
+dream_trigger_events:
+  - event: status
+    condition: "status == 'finished'"
+    trigger_type: large_task_completion
+  - event: export
+    condition: "always"
+    trigger_type: large_task_completion

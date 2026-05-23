@@ -1,0 +1,34 @@
+schema_version: "0.6"
+task_class: code_review
+description: >
+  Context adapter for code review tasks. Injects security procedures,
+  conventions, and the reviewer role card.
+
+sources:
+  - kind: gitmem_procedures
+    query:
+      task_class: code_review
+    max_results: 5
+    position: top
+    description: "Review procedures and checklists from durable memory"
+
+  - kind: gitmem_route_cards
+    query:
+      task_class: code_review
+    max_results: 2
+    position: top
+    description: "Route cards for code review — known good reviewer nodes"
+
+  - kind: conventions
+    files:
+      - CONVENTIONS.md
+      - AGENTS.md
+    position: top
+
+  - kind: role_card
+    profile: reviewer
+    position: system
+
+max_context_tokens: 12288
+inject_task_packet: true
+lint_before_inject: true

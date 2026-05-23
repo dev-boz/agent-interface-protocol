@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AIP Task Packet",
+  "description": "Schema for workspace/tasks/{task_id}.md frontmatter per AIP spec §10.",
+  "type": "object",
+  "required": ["task_id", "task_class", "risk_tier"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "0.6"},
+    "task_id": {"type": "string"},
+    "task_class": {
+      "type": "string",
+      "description": "Dotted task class identifier (e.g. implementation.bugfix)"
+    },
+    "risk_tier": {
+      "type": "string",
+      "enum": ["READ_ONLY", "LOCAL", "EXTERNAL"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "in_progress", "completed", "failed", "blocked"]
+    },
+    "assigned_to": {"type": "string"},
+    "requester": {"type": "string"},
+    "blocked_by": {"type": "string"},
+    "chain_depth": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Hop count for contamination tracking"
+    },
+    "budget_max_cost_usd": {"type": "number"},
+    "budget_max_tokens": {"type": "integer"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": "string", "format": "date-time"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

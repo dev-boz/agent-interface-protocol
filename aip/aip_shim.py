@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .hooks import HookRuntime
+from .imx_profile import ImxProfileConstraints, check_tool_allowed, load_imx_profile
 from .tmux import TmuxController, TmuxError
 from .workspace import isoformat_z, utc_now
 
@@ -200,6 +201,26 @@ class BlockRule:
     reason: str
 
 
+def load_block_rules_from_file(path: str | Path) -> list[BlockRule]:
+    """Load block rules from a plain-text file (one regex per line).
+
+    Lines starting with '#' and blank lines are skipped.
+    """
+    rules = []
+    p = Path(path)
+    if not p.exists():
+        return rules
+    for raw_line in p.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            rules.append(BlockRule(pattern=re.compile(line, re.IGNORECASE), reason=line[:80]))
+        except re.error:
+            logger.warning("Invalid regex in block file %s: %r", path, line)
+    return rules
+
+
 @dataclass
 class ShimState:
     """Runtime state for a shim watching one agent pane."""
@@ -226,6 +247,7 @@ class AipShim:
         poll_interval: float = 0.3,
         auto_approve: bool = True,
         block_rules: list[BlockRule] | None = None,
+        imx_profile: ImxProfileConstraints | None = None,
     ) -> None:
         self.workspace_root = workspace_root
         self.session_name = session_name
@@ -233,8 +255,35 @@ class AipShim:
         self.poll_interval = poll_interval
         self.auto_approve = auto_approve
         self.block_rules = block_rules or []
+        self.imx_profile = imx_profile
         self._states: dict[str, ShimState] = {}
         self._running = False
+
+    @classmethod
+    def from_workspace(
+        cls,
+        workspace_root: str,
+        session_name: str = "aip",
+        *,
+        poll_interval: float = 0.3,
+        auto_approve: bool = True,
+        imx_profile_name: str | None = None,
+    ) -> "AipShim":
+        """Create an AipShim with block rules loaded from .aip/block if present."""
+        ws = Path(workspace_root)
+        block_rules: list[BlockRule] = []
+        for candidate in [ws.parent / ".aip" / "block", ws / ".aip" / "block"]:
+            if candidate.exists():
+                block_rules = load_block_rules_from_file(candidate)
+                logger.info("Loaded %d block rules from %s", len(block_rules), candidate)
+                break
+        imx_profile: ImxProfileConstraints | None = None
+        if imx_profile_name is not None:
+            imx_profile = load_imx_profile(imx_profile_name)
+            logger.info("Loaded IMX profile %r (loaded=%s)", imx_profile_name, imx_profile.loaded)
+        return cls(workspace_root, session_name, poll_interval=poll_interval,
+                   auto_approve=auto_approve, block_rules=block_rules,
+                   imx_profile=imx_profile)
 
     def add_agent(self, agent_name: str, profile: ShimProfile) -> None:
         """Register an agent to watch."""
@@ -323,6 +372,12 @@ class AipShim:
         for rule in self.block_rules:
             if rule.pattern.search(combined):
                 logger.info("Blocked %s action for %s: %s", agent_name, rule.reason, context[:80])
+                return False
+        if self.imx_profile is not None and self.imx_profile.loaded:
+            tool_name = context.split()[0] if context else ""
+            allowed, reason = check_tool_allowed(tool_name, self.imx_profile)
+            if not allowed:
+                logger.info("IMX profile denied %s: %s", tool_name, reason)
                 return False
         return self.auto_approve
 

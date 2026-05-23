@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AIP Event",
+  "description": "Schema for one line in workspace/events.jsonl per AIP spec §10.",
+  "type": "object",
+  "required": ["ts", "agent", "event"],
+  "additionalProperties": true,
+  "properties": {
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp (e.g. 2026-03-17T14:23:01Z)"
+    },
+    "agent": {
+      "type": "string",
+      "description": "Name of the agent that emitted this event"
+    },
+    "event": {
+      "type": "string",
+      "enum": [
+        "status",
+        "progress",
+        "export",
+        "task",
+        "tool",
+        "notify",
+        "human_gate",
+        "subagent",
+        "compaction",
+        "intent_ack",
+        "heartbeat",
+        "route_request",
+        "route_decision",
+        "gate"
+      ],
+      "description": "Event type"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["working", "finished", "failed", "blocked", "idle"],
+      "description": "Agent status (for event=status)"
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable description"
+    },
+    "progress": {
+      "type": "string",
+      "description": "Progress indicator (e.g. '2 of 4 files done')"
+    },
+    "file": {
+      "type": "string",
+      "description": "Path to exported artifact (for event=export)"
+    },
+    "task_packet_ref": {
+      "type": "string",
+      "description": "Workspace-relative path to an IMX task packet"
+    },
+    "target": {
+      "type": "string",
+      "description": "Target agent name (for event=task, notify)"
+    },
+    "task": {
+      "type": "string",
+      "description": "Task description or task_id"
+    },
+    "tool": {
+      "type": "string",
+      "description": "Tool name (for event=tool)"
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["low", "normal", "high", "critical"],
+      "description": "Notification priority (for event=notify)"
+    },
+    "gate_ref": {
+      "type": "string",
+      "description": "Path to gate file (for event=human_gate)"
+    },
+    "requires_approval": {
+      "type": "boolean",
+      "description": "Whether human approval is required (for event=human_gate)"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "0.6"
+    }
+  }
+}
