@@ -1,0 +1,23 @@
+# AIP escalation patterns — commands that require human approval
+# (spec §"Human escalation shims"). One Python regex per line, matched against
+# the full command context. A match writes a workspace/gates/gate-*.json record
+# and blocks the agent until a human (or the orchestrator) sets approved: true.
+#
+# Unlike .aip/block (auto-deny), these are NOT denied outright — they pause for
+# a human decision. Use for high-consequence but legitimate actions.
+
+# Pushing or deploying to shared/remote targets
+git\s+push\b
+gh\s+pr\s+create\b
+gh\s+pr\s+merge\b
+
+# Deployments and releases
+\bdeploy\b
+\bpublish\b
+npm\s+publish\b
+\bterraform\s+apply\b
+kubectl\s+apply\b
+
+# Production-scoped operations
+--prod\b
+--production\b

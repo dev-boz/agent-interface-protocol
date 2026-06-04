@@ -1,0 +1,12 @@
+schema_version: "1"
+# Memory adapter for the Codex CLI harness (spec §"Memory Adapters").
+# A client-specific adapter, not a shared memory service: a bridge YAML plus a
+# local SQLite cache. The DB is a DERIVED cache — the canonical store is gitmem
+# or local files. Zero cloud, zero API keys.
+harness: codex-cli
+memory_db: "~/.aip/memory/codex.db"
+canonical_source: "~/.gitmem/memory/"
+# On these events the adapter extracts a summary and appends it to
+# ~/.gitmem/local/sessions/ so the dream pipeline governs promotion.
+sync_on: [session_end, pre_compact]
+max_cache_mb: 50

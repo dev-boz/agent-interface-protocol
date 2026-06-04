@@ -26,6 +26,23 @@ from .workspace import isoformat_z, utc_now
 
 logger = logging.getLogger("aip.aip-shim")
 
+
+def _extract_tool_name(command: str) -> str:
+    """Best-effort tool name for a captured interactive command line.
+
+    Strips common prompt decoration ("$ ", "> ", "Running:") and returns the
+    first bare token so PreToolUse events carry a meaningful ``tool`` field
+    (spec Tier 2 pending_approval shape). Falls back to ``"interactive"``.
+    """
+    cleaned = command.strip().lstrip("$># ").strip()
+    for prefix in ("running:", "execute:", "command:", "tool:"):
+        if cleaned.lower().startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip()
+            break
+    token = cleaned.split(maxsplit=1)[0] if cleaned else ""
+    return token.rstrip(":").lower() or "interactive"
+
+
 # Built-in shim profiles.  These can be overridden by YAML files but are
 # included so common CLIs work out of the box.
 BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
@@ -193,32 +210,16 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
     return result
 
 
-@dataclass
-class BlockRule:
-    """A pattern that should be denied automatically."""
-
-    pattern: re.Pattern[str]
-    reason: str
-
-
-def load_block_rules_from_file(path: str | Path) -> list[BlockRule]:
-    """Load block rules from a plain-text file (one regex per line).
-
-    Lines starting with '#' and blank lines are skipped.
-    """
-    rules = []
-    p = Path(path)
-    if not p.exists():
-        return rules
-    for raw_line in p.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        try:
-            rules.append(BlockRule(pattern=re.compile(line, re.IGNORECASE), reason=line[:80]))
-        except re.error:
-            logger.warning("Invalid regex in block file %s: %r", path, line)
-    return rules
+# BlockRule / loaders live in aip.block so the native hook path (aip.hooks)
+# can share them without a circular import. Re-exported here for compatibility.
+from .block import (  # noqa: E402,F401
+    BlockRule,
+    load_block_rules,
+    load_block_rules_from_file,
+    load_escalate_rules,
+    match_block,
+)
+from .gates import gate_ref, open_gate_path, read_gate, resolve_gate, write_gate  # noqa: E402
 
 
 @dataclass
@@ -247,6 +248,7 @@ class AipShim:
         poll_interval: float = 0.3,
         auto_approve: bool = True,
         block_rules: list[BlockRule] | None = None,
+        escalate_rules: list[BlockRule] | None = None,
         imx_profile: ImxProfileConstraints | None = None,
     ) -> None:
         self.workspace_root = workspace_root
@@ -255,6 +257,9 @@ class AipShim:
         self.poll_interval = poll_interval
         self.auto_approve = auto_approve
         self.block_rules = block_rules or []
+        # Commands matching an escalation rule require a human gate (block-and-
+        # wait) instead of auto-decision (spec §"Human escalation shims").
+        self.escalate_rules = escalate_rules or []
         self.imx_profile = imx_profile
         self._states: dict[str, ShimState] = {}
         self._running = False
@@ -269,21 +274,16 @@ class AipShim:
         auto_approve: bool = True,
         imx_profile_name: str | None = None,
     ) -> "AipShim":
-        """Create an AipShim with block rules loaded from .aip/block if present."""
-        ws = Path(workspace_root)
-        block_rules: list[BlockRule] = []
-        for candidate in [ws.parent / ".aip" / "block", ws / ".aip" / "block"]:
-            if candidate.exists():
-                block_rules = load_block_rules_from_file(candidate)
-                logger.info("Loaded %d block rules from %s", len(block_rules), candidate)
-                break
+        """Create an AipShim with block/escalation rules from .aip/ if present."""
+        block_rules = load_block_rules(workspace_root)
+        escalate_rules = load_escalate_rules(workspace_root)
         imx_profile: ImxProfileConstraints | None = None
         if imx_profile_name is not None:
             imx_profile = load_imx_profile(imx_profile_name)
             logger.info("Loaded IMX profile %r (loaded=%s)", imx_profile_name, imx_profile.loaded)
         return cls(workspace_root, session_name, poll_interval=poll_interval,
                    auto_approve=auto_approve, block_rules=block_rules,
-                   imx_profile=imx_profile)
+                   escalate_rules=escalate_rules, imx_profile=imx_profile)
 
     def add_agent(self, agent_name: str, profile: ShimProfile) -> None:
         """Register an agent to watch."""
@@ -300,6 +300,12 @@ class AipShim:
         state = self._states.get(agent_name)
         if state is None:
             raise ValueError(f"Agent not registered with shim: {agent_name}")
+
+        # An open human gate takes precedence: resolve it (inject the decision)
+        # or keep the agent blocked until a human writes approved to the file.
+        gate_result = self._resolve_gate_if_open(agent_name, state)
+        if gate_result is not None:
+            return gate_result
 
         if pane_content is None:
             try:
@@ -326,14 +332,62 @@ class AipShim:
         # Extract any command context from the pane
         matched_text = match.group(0)
         context_lines = new_content[:match.start()].strip().splitlines()
-        tool_context = context_lines[-1] if context_lines else ""
+        tool_context = context_lines[-1].strip() if context_lines else ""
+        command = tool_context or matched_text
+        tool_name = _extract_tool_name(command)
 
-        event_payload = {
-            "tool": "interactive",
-            "message": tool_context or matched_text,
-            "prompt_matched": matched_text,
-        }
-        runtime.emit("PreToolUse", event_payload)
+        # Emit the PreToolUse event in the spec's pending_approval shape
+        # (Tier 2 — Interactive Intercept): the orchestrator and .aip/block
+        # rules read {tool, data.command} to evaluate the action.
+        runtime.workspace.write_status(
+            agent_name,
+            status="working",
+            current_tool=tool_name,
+            last_tool_status="pending_approval",
+            active=True,
+            hook_event="pre_tool_use",
+        )
+        runtime.workspace.append_event(
+            agent_name,
+            "PreToolUse",
+            status="pending_approval",
+            tool=tool_name,
+            data={"command": command},
+            prompt_matched=matched_text,
+            source="shim",
+        )
+
+        # Human-escalation gate: a command matching an escalation rule must not
+        # be auto-decided. Write a gate record, emit a human_gate event, and
+        # leave the agent blocked until a human resolves it (spec §"Human
+        # escalation shims").
+        if match_block(command, self.escalate_rules) is not None:
+            gate_path = write_gate(self.workspace_root, agent_name, tool=tool_name, command=command)
+            ref = gate_ref(self.workspace_root, gate_path)
+            runtime.workspace.write_status(
+                agent_name,
+                status="needs-input",
+                current_tool=tool_name,
+                last_tool_status="human_gate",
+                active=True,
+                hook_event="pre_tool_use",
+            )
+            runtime.workspace.append_event(
+                agent_name,
+                "human_gate",
+                tool=tool_name,
+                command=command,
+                requires_approval=True,
+                gate_ref=ref,
+                source="shim",
+            )
+            return {
+                "agent": agent_name,
+                "action": "gated",
+                "gate_ref": ref,
+                "prompt": matched_text,
+                "ts": isoformat_z(utc_now()),
+            }
 
         # Decide approve or deny
         approved = self._should_approve(agent_name, tool_context, matched_text)
@@ -351,17 +405,87 @@ class AipShim:
         except TmuxError as exc:
             logger.warning("Failed to inject %s response for %s: %s", action, agent_name, exc)
 
-        # Emit PostToolUse event
-        runtime.emit("PostToolUse", {
-            "tool": "interactive",
-            "message": f"{action}: {tool_context or matched_text}",
-        })
+        # Emit PostToolUse event reflecting the injected decision
+        runtime.workspace.write_status(
+            agent_name,
+            remove_keys=("current_tool",),
+            status="working",
+            last_tool_status=action,
+            active=True,
+            hook_event="post_tool_use",
+        )
+        runtime.workspace.append_event(
+            agent_name,
+            "PostToolUse",
+            status=action,
+            tool=tool_name,
+            data={"command": command},
+            source="shim",
+        )
 
         return {
             "agent": agent_name,
             "action": action,
             "prompt": matched_text,
             "context": tool_context,
+            "ts": isoformat_z(utc_now()),
+        }
+
+    def _resolve_gate_if_open(self, agent_name: str, state: "ShimState") -> dict[str, Any] | None:
+        """Resolve an open human gate, or signal the agent is still blocked.
+
+        Returns None when there is no open gate (caller proceeds normally),
+        a ``waiting`` result while the gate is unresolved, or an
+        ``approved``/``denied`` result once a human sets ``approved`` — at which
+        point the stored decision is injected into the agent's pane.
+        """
+        gate_path = open_gate_path(self.workspace_root, agent_name)
+        if gate_path is None:
+            return None
+
+        record = read_gate(gate_path) or {}
+        ref = gate_ref(self.workspace_root, gate_path)
+        if record.get("approved") is None:
+            return {
+                "agent": agent_name,
+                "action": "waiting",
+                "gate_ref": ref,
+                "ts": isoformat_z(utc_now()),
+            }
+
+        approved = bool(record.get("approved"))
+        resolve_gate(gate_path, approved=approved)
+        tool_name = record.get("tool", "interactive")
+        command = record.get("command", "")
+        keys = state.profile.approve_keys if approved else state.profile.deny_keys
+        action = "approved" if approved else "denied"
+        try:
+            self.tmux.send_keys(agent_name, keys, press_enter=False)
+        except TmuxError as exc:
+            logger.warning("Failed to inject %s response for %s: %s", action, agent_name, exc)
+
+        runtime = HookRuntime(self.workspace_root, agent_name)
+        runtime.workspace.write_status(
+            agent_name,
+            remove_keys=("current_tool",),
+            status="working",
+            last_tool_status=action,
+            active=True,
+            hook_event="post_tool_use",
+        )
+        runtime.workspace.append_event(
+            agent_name,
+            "PostToolUse",
+            status=action,
+            tool=tool_name,
+            data={"command": command},
+            via="human_gate",
+            source="shim",
+        )
+        return {
+            "agent": agent_name,
+            "action": action,
+            "gate_ref": ref,
             "ts": isoformat_z(utc_now()),
         }
 

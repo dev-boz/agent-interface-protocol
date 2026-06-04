@@ -11,6 +11,7 @@ from typing import Any
 
 from . import __version__
 from .interest_maps import InterestRegistry, InterestSubscription
+from .redact import redact_text
 from .tasks import TaskQueue
 from .tmux import TmuxController
 from .workspace import AipWorkspace, VALID_STATUSES, sanitize_component, isoformat_z, utc_now
@@ -309,27 +310,27 @@ TOOL_SPECS = (
                 },
                 "budget": {
                     "type": "object",
-                        "description": "Optional budget constraints (max_cost_usd, max_tokens).",
-                        "properties": {
-                            "max_cost_usd": {"type": "number"},
-                            "max_tokens": {"type": "integer"},
-                            "gate_mode": {"type": "string", "enum": ["soft", "hard"]},
-                        },
-                        "additionalProperties": False,
+                    "description": "Optional budget constraints (max_cost_usd, max_tokens).",
+                    "properties": {
+                        "max_cost_usd": {"type": "number"},
+                        "max_tokens": {"type": "integer"},
+                        "gate_mode": {"type": "string", "enum": ["soft", "hard"]},
                     },
-                    "task_packet": {
-                        "type": "object",
-                        "description": (
-                            "Optional IMX task packet fields to merge with the minimal packet "
-                            "AIP writes for this route request."
-                        ),
-                        "additionalProperties": True,
-                    },
+                    "additionalProperties": False,
                 },
-                "required": ["task_id", "task_class", "risk_tier"],
-                "additionalProperties": False,
+                "task_packet": {
+                    "type": "object",
+                    "description": (
+                        "Optional IMX task packet fields to merge with the minimal packet "
+                        "AIP writes for this route request."
+                    ),
+                    "additionalProperties": True,
+                },
             },
+            "required": ["task_id", "task_class", "risk_tier"],
+            "additionalProperties": False,
         },
+    },
     {
         "name": "write_heartbeat",
         "description": (
@@ -629,10 +630,20 @@ class AipToolRuntime:
         return json.dumps(snapshot, indent=2)
 
     def export_summary(self, content: str, *, task_id: str | None = None) -> str:
-        summary_path = self.workspace.export_summary(self.agent_name, content)
+        # Scrub secrets/tokens/PII before the summary lands where other agents
+        # can read it (spec §"Redaction hooks").
+        redacted, reasons = redact_text(content)
+        n_redactions = sum(reasons.values())
+        summary_path = self.workspace.export_summary(self.agent_name, redacted)
         relative_path = summary_path.relative_to(self.workspace.root).as_posix()
-        self.workspace.append_event(self.agent_name, "export", file=relative_path, task_id=task_id)
-        return json.dumps({"file": relative_path, "task_id": task_id}, indent=2)
+        self.workspace.append_event(
+            self.agent_name, "export", file=relative_path, task_id=task_id,
+            redactions=n_redactions or None,
+        )
+        return json.dumps(
+            {"file": relative_path, "task_id": task_id, "redactions": n_redactions},
+            indent=2,
+        )
 
     def register_capabilities(
         self,

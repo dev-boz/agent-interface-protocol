@@ -1,0 +1,16 @@
+schema_version: "0.6"
+# Runtime bridge adapter template for the Codex CLI harness (spec §"Runtime
+# Bridge Adapter Templates"). Thin, repo-local, and replaceable: it maps the
+# CLI's native hook names and task/status paths onto AIP's filesystem surface.
+# The workspace files remain authoritative — if this bridge disappears, the
+# orchestrator can still reconstruct state from the workspace.
+harness: codex-cli
+event_map:
+  session_start: SessionStart
+  pre_tool_use: PreToolUse
+  post_tool_use: PostToolUse
+  session_end: SessionEnd
+surfaces:
+  event_log: workspace/events.jsonl
+  task_root: workspace/tasks
+  status_file: workspace/status/coder.json

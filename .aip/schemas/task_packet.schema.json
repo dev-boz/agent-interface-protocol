@@ -15,6 +15,12 @@
       "type": "string",
       "enum": ["READ_ONLY", "LOCAL", "EXTERNAL"]
     },
+    "relationship": {
+      "type": "string",
+      "enum": ["root", "subtask", "workflow_step", "advisory", "review"],
+      "default": "subtask",
+      "description": "Relationship of this packet to its parent (spec §10.2)"
+    },
     "status": {
       "type": "string",
       "enum": ["pending", "in_progress", "completed", "failed", "blocked"]
@@ -22,10 +28,22 @@
     "assigned_to": {"type": "string"},
     "requester": {"type": "string"},
     "blocked_by": {"type": "string"},
-    "chain_depth": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Hop count for contamination tracking"
+    "provenance": {
+      "type": "object",
+      "description": "Provenance block per spec §5.2; chain_depth tracks handoff hops for contamination.",
+      "properties": {
+        "written_by": {"type": "string"},
+        "written_at": {"type": "string", "format": "date-time"},
+        "source_node": {"type": "string"},
+        "harness_fingerprint": {"type": "string"},
+        "confidence": {"type": "number"},
+        "chain_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hop count for contamination tracking"
+        }
+      },
+      "additionalProperties": true
     },
     "budget_max_cost_usd": {"type": "number"},
     "budget_max_tokens": {"type": "integer"},

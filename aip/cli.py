@@ -217,6 +217,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     shim_list_profiles = shim_subparsers.add_parser("list-profiles")
 
+    redact_parser = subparsers.add_parser(
+        "redact", help="Scrub secrets/tokens/PII from files in place (aip-redact)"
+    )
+    redact_parser.add_argument("files", nargs="+", help="Files to redact in place")
+
+    context_parser = subparsers.add_parser(
+        "context", help="Build a bounded context pack for a task"
+    )
+    context_subparsers = context_parser.add_subparsers(dest="context_command", required=True)
+    context_build = context_subparsers.add_parser("build")
+    context_build.add_argument("--task-class", required=True)
+    context_build.add_argument("--task-id", required=True)
+    context_build.add_argument("--workspace-root", default="workspace")
+    context_build.add_argument("--config-dir", default=".aip/context")
+    context_build.add_argument("--repo-root", default=".")
+    context_build.add_argument("--roles-dir", default=None)
+
+    plan_parser = subparsers.add_parser(
+        "plan", help="Project a task's plan.yaml DAG into the queue"
+    )
+    plan_subparsers = plan_parser.add_subparsers(dest="plan_command", required=True)
+    plan_status = plan_subparsers.add_parser("status")
+    plan_status.add_argument("--task-id", required=True)
+    plan_status.add_argument("--workspace-root", default="workspace")
+    plan_project = plan_subparsers.add_parser("project")
+    plan_project.add_argument("--task-id", required=True)
+    plan_project.add_argument("--workspace-root", default="workspace")
+
     return parser
 
 
@@ -398,6 +426,50 @@ def main(argv: list[str] | None = None) -> int:
 
             # watch mode
             shim.run(max_iterations=args.max_iterations)
+            return 0
+
+    if args.command_group == "redact":
+        from .redact import redact_file
+
+        results = {}
+        total = 0
+        for file_path in args.files:
+            reasons = redact_file(file_path)
+            results[file_path] = reasons
+            total += sum(reasons.values())
+        print(json.dumps({"files": results, "total_redactions": total}, indent=2))
+        return 0
+
+    if args.command_group == "context" and args.context_command == "build":
+        from .context_adapter import build_and_write
+
+        path = build_and_write(
+            args.task_class,
+            args.task_id,
+            workspace_root=args.workspace_root,
+            config_dir=args.config_dir,
+            repo_root=args.repo_root,
+            roles_dir=args.roles_dir,
+        )
+        print(json.dumps({"context_pack": str(path)}, indent=2))
+        return 0
+
+    if args.command_group == "plan":
+        from .plan import load_plan, node_states, plan_path, project_plan, task_tree
+
+        workspace = AipWorkspace(args.workspace_root)
+        plan = load_plan(plan_path(workspace, args.task_id))
+
+        if args.plan_command == "status":
+            states = node_states(plan, task_tree(workspace, args.task_id))
+            print(json.dumps({"task_id": plan.task_id, "states": states}, indent=2))
+            return 0
+
+        if args.plan_command == "project":
+            queue = TaskQueue(workspace)
+            projected = project_plan(plan, queue)
+            states = node_states(plan, task_tree(workspace, args.task_id))
+            print(json.dumps({"task_id": plan.task_id, "projected": projected, "states": states}, indent=2))
             return 0
 
     raise AssertionError("Unhandled command")

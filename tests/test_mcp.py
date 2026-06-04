@@ -184,6 +184,17 @@ def test_export_summary(tmp_path):
     result = json.loads(runtime.execute("export_summary", {"content": "# Review\nAll good."}))
     assert result["file"].startswith("summaries/")
     assert (tmp_path / "workspace" / result["file"]).exists()
+    assert result["redactions"] == 0
+
+
+def test_export_summary_redacts_secrets(tmp_path):
+    runtime = AipToolRuntime(str(tmp_path / "workspace"), "coder")
+    content = "# Deploy\nused token ghp_abcdefghijklmnopqrstuvwxyz0123456789 to push"
+    result = json.loads(runtime.execute("export_summary", {"content": content}))
+    assert result["redactions"] == 1
+    written = (tmp_path / "workspace" / result["file"]).read_text()
+    assert "ghp_" not in written
+    assert "[REDACTED:github_token]" in written
 
 
 def test_report_progress(tmp_path):
