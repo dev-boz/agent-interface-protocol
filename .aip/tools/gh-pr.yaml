@@ -1,0 +1,28 @@
+schema_version: "0.6"
+tool_id: gh_pr
+description: >
+  Leaf tool conformance declaration for GitHub pull-request creation
+  (gh pr create / merge requests). Classified as EXTERNAL risk tier per
+  spec §"Worktree-Branch-Session Mapping": PR creation is a leaf-tool step,
+  not a platform hook.
+
+risk_tier: EXTERNAL
+
+capability_tags:
+  - deployment
+  - deployment.pull_request
+
+telemetry: true
+
+pre_hooks:
+  - name: require-approval
+    description: "Block PR creation without ~/.imx/state/approvals/{task_id}.json"
+    script: ".aip/hooks/require-imx-approval.sh"
+    on_fail: DENY
+  - name: require-demo-artifact
+    description: "Block PR creation without artifacts/demo/{task_id}.md"
+    script: ".aip/hooks/require-demo-artifact.sh"
+    on_fail: DENY
+
+timeout_seconds: 120
+capture_output: true

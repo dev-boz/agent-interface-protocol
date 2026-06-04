@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import __version__
+from .interest_maps import InterestRegistry, InterestSubscription
+from .redact import redact_text
 from .tasks import TaskQueue
 from .tmux import TmuxController
-from .workspace import AipWorkspace, VALID_STATUSES, sanitize_component
+from .workspace import AipWorkspace, VALID_STATUSES, sanitize_component, isoformat_z, utc_now
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,6 +117,9 @@ INTERESTS_SCHEMA = {
     "additionalProperties": False,
 }
 
+VALID_RISK_TIERS = frozenset({"READ_ONLY", "LOCAL", "EXTERNAL"})
+VALID_TASK_PACKET_RELATIONSHIPS = frozenset({"root", "subtask", "workflow_step", "advisory", "review"})
+
 TOOL_SPECS = (
     {
         "name": "report_status",
@@ -178,6 +183,14 @@ TOOL_SPECS = (
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Task IDs that must complete before this task can be claimed.",
+                },
+                "task_packet": {
+                    "type": "object",
+                    "description": (
+                        "Optional IMX task packet payload. When present, AIP writes it to "
+                        "workspace/tasks/packets/ and references it from the queued task."
+                    ),
+                    "additionalProperties": True,
                 },
             },
             "required": ["task_description"],
@@ -276,6 +289,135 @@ TOOL_SPECS = (
             "additionalProperties": False,
         },
     },
+    {
+        "name": "request_route",
+        "description": (
+            "Emit a route request to workspace/route-requests/ for IMX to resolve. "
+            "IMX reads this file and writes a route decision to workspace/route-decisions/. "
+            "Use when the agent needs routing guidance before dispatching a subtask."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "ID of the task needing routing."},
+                "task_class": {
+                    "type": "string",
+                    "description": "Task class from catalog/task_classes.yaml, e.g. 'implementation.bugfix'.",
+                },
+                "risk_tier": {
+                    "type": "string",
+                    "enum": ["READ_ONLY", "LOCAL", "EXTERNAL"],
+                },
+                "budget": {
+                    "type": "object",
+                    "description": "Optional budget constraints (max_cost_usd, max_tokens).",
+                    "properties": {
+                        "max_cost_usd": {"type": "number"},
+                        "max_tokens": {"type": "integer"},
+                        "gate_mode": {"type": "string", "enum": ["soft", "hard"]},
+                    },
+                    "additionalProperties": False,
+                },
+                "task_packet": {
+                    "type": "object",
+                    "description": (
+                        "Optional IMX task packet fields to merge with the minimal packet "
+                        "AIP writes for this route request."
+                    ),
+                    "additionalProperties": True,
+                },
+            },
+            "required": ["task_id", "task_class", "risk_tier"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "write_heartbeat",
+        "description": (
+            "Update the agent's HEARTBEAT file. Call periodically during long-running tasks "
+            "so orchestrators can detect liveness. Updates both the HEARTBEAT Markdown file "
+            "and appends a heartbeat event to events.jsonl."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": sorted(VALID_STATUSES),
+                    "description": "Current agent status.",
+                },
+                "message": {"type": "string", "description": "Optional progress note."},
+            },
+            "required": ["status"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "emit_dream_candidate",
+        "description": (
+            "Write a dream candidate to workspace/dream-candidates/ for gitmem Dream pipeline ingestion. "
+            "Use when the agent has produced a reusable lesson, discovered a routing pattern, "
+            "or identified a procedure worth consolidating into durable memory."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The lesson, pattern, or procedure text to consolidate.",
+                },
+                "trigger_type": {
+                    "type": "string",
+                    "enum": [
+                        "large_task_completion",
+                        "query_gap",
+                        "route_failure",
+                        "context_saturation",
+                        "entrenchment_risk",
+                        "procedure_regression",
+                        "policy_drift",
+                    ],
+                    "description": "Why this candidate is being emitted.",
+                },
+                "task_id": {"type": "string"},
+                "task_class": {"type": "string"},
+            },
+            "required": ["content", "trigger_type"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "register_interest",
+        "description": "Register this agent's event interest subscriptions for selective notification.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_name": {"type": "string"},
+                "kinds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "min_priority": {"type": "integer", "default": 2},
+                "task_filter": {"type": "string", "default": ""},
+            },
+            "required": ["agent_name", "kinds"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "query_interests",
+        "description": "Query which agents are interested in a given event kind and priority.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string"},
+                "priority": {"type": "integer", "default": 2},
+                "task_id": {"type": "string", "default": ""},
+            },
+            "required": ["kind"],
+            "additionalProperties": False,
+        },
+    },
 )
 
 TOOL_NAMES = tuple(spec["name"] for spec in TOOL_SPECS)
@@ -286,24 +428,34 @@ TOOL_PROFILES: dict[str, tuple[str, ...]] = {
     "worker": (
         "export_summary",
         "register_capabilities",
+        "write_heartbeat",
+        "emit_dream_candidate",
+        "register_interest",
+        "query_interests",
     ),
     "worker-hookless": (
         "report_status",
         "report_progress",
         "export_summary",
         "register_capabilities",
+        "write_heartbeat",
     ),
     "reviewer": (
         "export_summary",
         "read_pane",
         "notify",
         "register_capabilities",
+        "emit_dream_candidate",
     ),
     "architect": (
         "export_summary",
         "read_pane",
         "notify",
         "register_capabilities",
+        "request_route",
+        "emit_dream_candidate",
+        "register_interest",
+        "query_interests",
     ),
     "manager": (
         "export_summary",
@@ -312,6 +464,11 @@ TOOL_PROFILES: dict[str, tuple[str, ...]] = {
         "request_task",
         "wait_for",
         "spawn_teammate",
+        "request_route",
+        "write_heartbeat",
+        "emit_dream_candidate",
+        "register_interest",
+        "query_interests",
     ),
 }
 
@@ -395,6 +552,7 @@ class AipToolRuntime:
                 context=args.get("context"),
                 priority=args.get("priority"),
                 blocked_by=args.get("blocked_by"),
+                task_packet=args.get("task_packet"),
             )
         if name == "report_progress":
             return self.report_progress(args["progress"], percentage=args.get("percentage"))
@@ -423,6 +581,36 @@ class AipToolRuntime:
                 priority=args["priority"],
                 elicit=args.get("elicit", False),
             )
+        if name == "request_route":
+            return self.request_route(
+                task_id=args["task_id"],
+                task_class=args["task_class"],
+                risk_tier=args["risk_tier"],
+                budget=args.get("budget"),
+                task_packet=args.get("task_packet"),
+            )
+        if name == "write_heartbeat":
+            return self.write_heartbeat(args["status"], message=args.get("message"))
+        if name == "emit_dream_candidate":
+            return self.emit_dream_candidate(
+                content=args["content"],
+                trigger_type=args["trigger_type"],
+                task_id=args.get("task_id"),
+                task_class=args.get("task_class"),
+            )
+        if name == "register_interest":
+            return self.register_interest(
+                agent_name=args["agent_name"],
+                kinds=args["kinds"],
+                min_priority=args.get("min_priority", 2),
+                task_filter=args.get("task_filter", ""),
+            )
+        if name == "query_interests":
+            return self.query_interests(
+                kind=args["kind"],
+                priority=args.get("priority", 2),
+                task_id=args.get("task_id", ""),
+            )
         raise ToolInputError(f"Unknown tool: {name}")
 
     def list_tool_specs(self) -> list[dict[str, Any]]:
@@ -442,10 +630,20 @@ class AipToolRuntime:
         return json.dumps(snapshot, indent=2)
 
     def export_summary(self, content: str, *, task_id: str | None = None) -> str:
-        summary_path = self.workspace.export_summary(self.agent_name, content)
+        # Scrub secrets/tokens/PII before the summary lands where other agents
+        # can read it (spec §"Redaction hooks").
+        redacted, reasons = redact_text(content)
+        n_redactions = sum(reasons.values())
+        summary_path = self.workspace.export_summary(self.agent_name, redacted)
         relative_path = summary_path.relative_to(self.workspace.root).as_posix()
-        self.workspace.append_event(self.agent_name, "export", file=relative_path, task_id=task_id)
-        return json.dumps({"file": relative_path, "task_id": task_id}, indent=2)
+        self.workspace.append_event(
+            self.agent_name, "export", file=relative_path, task_id=task_id,
+            redactions=n_redactions or None,
+        )
+        return json.dumps(
+            {"file": relative_path, "task_id": task_id, "redactions": n_redactions},
+            indent=2,
+        )
 
     def register_capabilities(
         self,
@@ -485,6 +683,77 @@ class AipToolRuntime:
                 result[section] = cleaned
         return result
 
+    def _prepare_task_packet(
+        self,
+        *,
+        task_id: str,
+        task_description: str | None = None,
+        task_class: str | None = None,
+        risk_tier: str | None = None,
+        budget: dict[str, Any] | None = None,
+        task_packet: dict[str, Any] | None = None,
+        relationship_default: str = "subtask",
+    ) -> tuple[dict[str, Any], str]:
+        if task_packet is not None and not isinstance(task_packet, dict):
+            raise ToolInputError("task_packet must be an object")
+
+        payload = dict(task_packet or {})
+        existing_task_id = payload.get("task_id")
+        if existing_task_id is not None and existing_task_id != task_id:
+            raise ToolInputError(
+                f"task_packet.task_id {existing_task_id!r} does not match task_id {task_id!r}"
+            )
+        payload["schema_version"] = str(payload.get("schema_version") or "0.6")
+        payload["task_id"] = task_id
+
+        for field_name, explicit_value in (("task_class", task_class), ("risk_tier", risk_tier)):
+            existing_value = payload.get(field_name)
+            if explicit_value is not None:
+                if existing_value is not None and existing_value != explicit_value:
+                    raise ToolInputError(
+                        f"task_packet.{field_name} {existing_value!r} does not match {field_name} {explicit_value!r}"
+                    )
+                payload[field_name] = explicit_value
+
+        if budget is not None and "budget" not in payload:
+            payload["budget"] = budget
+        payload.setdefault("relationship", relationship_default)
+        if task_description and "instructions" not in payload and "instructions_ref" not in payload:
+            payload["instructions"] = task_description
+
+        provenance_raw = payload.get("provenance")
+        if provenance_raw is None:
+            provenance: dict[str, Any] = {}
+        elif isinstance(provenance_raw, dict):
+            provenance = dict(provenance_raw)
+        else:
+            raise ToolInputError("task_packet.provenance must be an object")
+        provenance.setdefault("written_by", self.agent_name)
+        provenance.setdefault("written_at", isoformat_z(utc_now()))
+        try:
+            chain_depth = int(provenance.get("chain_depth", 0))
+        except (TypeError, ValueError) as exc:
+            raise ToolInputError("task_packet.provenance.chain_depth must be an integer") from exc
+        if chain_depth < 0:
+            raise ToolInputError("task_packet.provenance.chain_depth must be >= 0")
+        provenance["chain_depth"] = chain_depth
+        payload["provenance"] = provenance
+
+        packet_task_class = payload.get("task_class")
+        if not isinstance(packet_task_class, str) or not packet_task_class.strip():
+            raise ToolInputError("task_packet.task_class is required")
+        packet_risk_tier = payload.get("risk_tier")
+        if packet_risk_tier not in VALID_RISK_TIERS:
+            valid = ", ".join(sorted(VALID_RISK_TIERS))
+            raise ToolInputError(f"task_packet.risk_tier must be one of: {valid}")
+        relationship = payload.get("relationship")
+        if relationship not in VALID_TASK_PACKET_RELATIONSHIPS:
+            valid = ", ".join(sorted(VALID_TASK_PACKET_RELATIONSHIPS))
+            raise ToolInputError(f"task_packet.relationship must be one of: {valid}")
+
+        path = self.workspace.write_task_packet(task_id, payload)
+        return payload, path.relative_to(self.workspace.root).as_posix()
+
     def request_task(
         self,
         *,
@@ -493,7 +762,26 @@ class AipToolRuntime:
         context: str | None = None,
         priority: str | None = None,
         blocked_by: list[str] | None = None,
+        task_packet: dict[str, Any] | None = None,
     ) -> str:
+        task_packet_ref: str | None = None
+        metadata: dict[str, str] | None = None
+        chain_depth = 0
+        task_id = None
+        if task_packet is not None:
+            if not isinstance(task_packet, dict):
+                raise ToolInputError("task_packet must be an object")
+            requested_task_id = task_packet.get("task_id")
+            if requested_task_id is not None and not isinstance(requested_task_id, str):
+                raise ToolInputError("task_packet.task_id must be a string when provided")
+            task_id = requested_task_id or self.workspace.next_task_id()
+            packet_payload, task_packet_ref = self._prepare_task_packet(
+                task_id=task_id,
+                task_description=task_description,
+                task_packet=task_packet,
+            )
+            metadata = {"task_packet_ref": task_packet_ref}
+            chain_depth = int(packet_payload["provenance"]["chain_depth"])
         task = self.queue.create_task(
             description=task_description,
             task_type="delegated",
@@ -502,15 +790,18 @@ class AipToolRuntime:
             context=context,
             requested_by=self.agent_name,
             blocked_by=blocked_by,
+            chain_depth=chain_depth,
+            task_id=task_id,
+            metadata=metadata,
         )
-        return json.dumps(
-            {
-                "task_id": task.task_id,
-                "path": f"tasks/pending/{task.task_id}.md",
-                "blocked_by": task.blocked_by or None,
-            },
-            indent=2,
-        )
+        response = {
+            "task_id": task.task_id,
+            "path": f"tasks/pending/{task.task_id}.md",
+            "blocked_by": task.blocked_by or None,
+        }
+        if task_packet_ref is not None:
+            response["task_packet_ref"] = task_packet_ref
+        return json.dumps(response, indent=2)
 
     def report_progress(self, progress: str, *, percentage: float | None = None) -> str:
         if percentage is not None and not 0 <= percentage <= 100:
@@ -527,6 +818,116 @@ class AipToolRuntime:
             percentage=percentage,
         )
         return json.dumps(snapshot, indent=2)
+
+    def request_route(
+        self,
+        *,
+        task_id: str,
+        task_class: str,
+        risk_tier: str,
+        budget: dict[str, Any] | None = None,
+        task_packet: dict[str, Any] | None = None,
+    ) -> str:
+        packet_payload, task_packet_ref = self._prepare_task_packet(
+            task_id=task_id,
+            task_class=task_class,
+            risk_tier=risk_tier,
+            budget=budget,
+            task_packet=task_packet,
+        )
+        path = self.workspace.write_route_request(
+            task_id,
+            task_class=task_class,
+            risk_tier=risk_tier,
+            requester=self.agent_name,
+            budget=packet_payload.get("budget"),
+            task_packet_ref=task_packet_ref,
+            capability_profile=packet_payload.get("capability_profile"),
+            chain_depth=packet_payload["provenance"].get("chain_depth"),
+        )
+        relative = path.relative_to(self.workspace.root).as_posix()
+        self.workspace.append_event(
+            self.agent_name,
+            "route_request",
+            task_id=task_id,
+            task_class=task_class,
+            risk_tier=risk_tier,
+            file=relative,
+            task_packet_ref=task_packet_ref,
+        )
+        return json.dumps(
+            {
+                "file": relative,
+                "task_id": task_id,
+                "status": "pending",
+                "task_packet_ref": task_packet_ref,
+            },
+            indent=2,
+        )
+
+    def write_heartbeat(self, status: str, *, message: str | None = None) -> str:
+        if status not in VALID_STATUSES:
+            raise ToolInputError(f"Invalid status: {status}")
+        extra = {"message": message} if message else None
+        path = self.workspace.write_heartbeat(self.agent_name, status=status, extra=extra)
+        self.workspace.append_event(self.agent_name, "heartbeat", status=status, message=message)
+        return json.dumps({"file": path.name, "status": status}, indent=2)
+
+    def emit_dream_candidate(
+        self,
+        *,
+        content: str,
+        trigger_type: str,
+        task_id: str | None = None,
+        task_class: str | None = None,
+    ) -> str:
+        path = self.workspace.append_dream_candidate(
+            source=self.agent_name,
+            content=content,
+            task_id=task_id,
+            task_class=task_class,
+            trigger_type=trigger_type,
+        )
+        relative = path.relative_to(self.workspace.root).as_posix()
+        self.workspace.append_event(
+            self.agent_name,
+            "dream_candidate",
+            file=relative,
+            trigger_type=trigger_type,
+            task_id=task_id,
+            task_class=task_class,
+        )
+        return json.dumps({"file": relative, "trigger_type": trigger_type}, indent=2)
+
+    def register_interest(
+        self,
+        *,
+        agent_name: str,
+        kinds: list[str],
+        min_priority: int = 2,
+        task_filter: str = "",
+    ) -> str:
+        registry = InterestRegistry(self.workspace.interests_path)
+        sub = InterestSubscription(
+            agent_name=agent_name,
+            kinds=kinds,
+            min_priority=min_priority,
+            task_filter=task_filter,
+            registered_at=isoformat_z(utc_now()),
+        )
+        registry.register(sub)
+        return json.dumps({"registered": True, "agent": agent_name, "kinds": kinds}, indent=2)
+
+    def query_interests(
+        self,
+        *,
+        kind: str,
+        priority: int = 2,
+        task_id: str = "",
+    ) -> str:
+        registry = InterestRegistry(self.workspace.interests_path)
+        agents = registry.interested_agents(kind, priority=priority, task_id=task_id)
+        return json.dumps({"agents": agents, "kind": kind}, indent=2)
 
     def read_pane(
         self,

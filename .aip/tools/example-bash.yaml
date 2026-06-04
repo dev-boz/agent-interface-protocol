@@ -1,0 +1,33 @@
+schema_version: "0.6"
+tool_id: bash
+description: >
+  Leaf tool conformance declaration for the bash/shell execution tool.
+  Used by AIP shims to enforce capability profile constraints before execution.
+
+# Risk tier this tool contributes to the task when invoked.
+risk_tier: LOCAL
+
+# Capability tags this tool satisfies.
+capability_tags:
+  - bash_execution
+  - local_execution
+
+# Whether this tool's output should be included in IMX telemetry.
+telemetry: true
+
+# Pre-execution hooks run before the tool fires.
+pre_hooks:
+  - name: no-rm-rf
+    description: "Block accidental recursive deletion"
+    script: ".aip/hooks/no-rm-rf.sh"
+    on_fail: DENY
+  - name: no-production-write
+    description: "Block writes to production paths without EXTERNAL approval"
+    script: ".aip/hooks/no-production-write.sh"
+    on_fail: DENY
+
+# Maximum execution time in seconds before the tool is considered hung.
+timeout_seconds: 300
+
+# Whether the tool's stdout/stderr should be captured to workspace artifacts.
+capture_output: false

@@ -32,6 +32,12 @@ Issues = "https://github.com/dev-boz/agent-interface-protocol/issues"
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pyyaml>=6.0",
+]
+# Context adapters read .aip/context/*.yaml. The core packing logic is
+# dependency-free; loading config files from disk needs PyYAML.
+context = [
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]

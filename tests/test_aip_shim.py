@@ -13,6 +13,7 @@ from aip.aip_shim import (
     BlockRule,
     ShimProfile,
     _parse_simple_yaml,
+    load_block_rules_from_file,
     load_profile,
 )
 from aip.cli import main
@@ -126,6 +127,29 @@ def test_check_once_detects_approval_prompt(tmp_path):
     assert result["agent"] == "agent-amp"
     assert "prompt" in result
     assert len(tmux.sent_keys) == 1
+
+
+def test_check_once_emits_pending_approval_event(tmp_path):
+    """PreToolUse event must follow the spec's pending_approval shape."""
+    tmux = FakeTmuxController()
+    shim = AipShim(
+        str(tmp_path / "workspace"),
+        tmux_controller=tmux,
+        auto_approve=True,
+    )
+    profile = load_profile("amp")
+    shim.add_agent("agent-amp", profile)
+
+    pane_text = "Running: rm -rf /\nAllow this action? [Y/n]"
+    shim.check_once("agent-amp", pane_content=pane_text)
+
+    events_path = tmp_path / "workspace" / "events.jsonl"
+    records = [json.loads(line) for line in events_path.read_text().splitlines()]
+    pre = next(r for r in records if r["event"] == "PreToolUse")
+    assert pre["status"] == "pending_approval"
+    assert "data" in pre and "command" in pre["data"]
+    assert "rm -rf /" in pre["data"]["command"]
+    assert pre["tool"] != "interactive"  # extracted from the command line
 
 
 def test_check_once_no_prompt_returns_none(tmp_path):
@@ -243,3 +267,22 @@ def test_shim_list_profiles_cli(capsys, tmp_path):
     # Spot-check tiers
     assert profiles["amp"]["tier"] == "intercept"
     assert profiles["claude-code"]["tier"] == "native"
+
+
+# ---------------------------------------------------------------------------
+# load_block_rules_from_file
+# ---------------------------------------------------------------------------
+
+
+def test_load_block_rules_from_file_parses_patterns(tmp_path):
+    block_file = tmp_path / "block"
+    block_file.write_text("# comment\n\nrm -rf /\ngit push --force\n")
+    rules = load_block_rules_from_file(block_file)
+    assert len(rules) == 2
+    assert rules[0].pattern.search("rm -rf /tmp")
+    assert rules[1].pattern.search("git push --force origin main")
+
+
+def test_load_block_rules_from_file_missing_file(tmp_path):
+    rules = load_block_rules_from_file(tmp_path / "nonexistent")
+    assert rules == []

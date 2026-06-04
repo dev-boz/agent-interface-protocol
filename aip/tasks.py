@@ -63,6 +63,7 @@ class Task:
     blocked_by: list[str] = field(default_factory=list)
     body: str = ""
     metadata: dict[str, str] = field(default_factory=dict)
+    chain_depth: int = 0
 
     def to_markdown(self) -> str:
         lines = [f"# {self.task_id}"]
@@ -76,6 +77,7 @@ class Task:
             ("claimed_by", self.claimed_by or ""),
             ("lease_expires", self.lease_expires or ""),
             ("blocked_by", ", ".join(self.blocked_by) if self.blocked_by else ""),
+            ("chain_depth", str(self.chain_depth) if self.chain_depth else ""),
         )
         for key, value in ordered_fields:
             if value:
@@ -118,6 +120,7 @@ def parse_task(text: str) -> Task:
         "claimed_by",
         "lease_expires",
         "blocked_by",
+        "chain_depth",
     }
     extra = {key: value for key, value in metadata.items() if key not in known_fields}
 
@@ -137,6 +140,7 @@ def parse_task(text: str) -> Task:
         blocked_by=blocked_by,
         body=body,
         metadata=extra,
+        chain_depth=int(metadata.get("chain_depth", 0)),
     )
 
 
@@ -157,6 +161,8 @@ class TaskQueue:
         task_id: str | None = None,
         requested_by: str = "system",
         blocked_by: list[str] | None = None,
+        chain_depth: int = 0,
+        metadata: dict[str, str] | None = None,
     ) -> Task:
         cleaned_blocked_by = []
         if blocked_by:
@@ -165,6 +171,15 @@ class TaskQueue:
                 if stripped:
                     _validate_task_id(stripped)
                     cleaned_blocked_by.append(stripped)
+        cleaned_metadata: dict[str, str] = {}
+        if metadata:
+            for key, value in metadata.items():
+                stripped_key = str(key).strip()
+                if not stripped_key:
+                    continue
+                cleaned_value = _single_line(str(value))
+                if cleaned_value:
+                    cleaned_metadata[stripped_key] = cleaned_value
         task = Task(
             task_id=_validate_task_id(task_id) if task_id else self.workspace.next_task_id(),
             task_type=_single_line(task_type) or "general",
@@ -175,6 +190,8 @@ class TaskQueue:
             created_at=isoformat_z(utc_now()),
             blocked_by=cleaned_blocked_by,
             body=body.strip(),
+            chain_depth=chain_depth,
+            metadata=cleaned_metadata,
         )
         task_path = self.workspace.pending_dir / f"{task.task_id}.md"
         if task_path.exists():
@@ -417,4 +434,5 @@ class TaskQueue:
             lease_expires=lease_expires or task.lease_expires,
             reason=reason,
             handoff_summary=handoff_summary,
+            chain_depth=task.chain_depth,
         )

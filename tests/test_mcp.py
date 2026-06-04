@@ -49,8 +49,8 @@ class FakeTmuxController:
         return PaneMetrics(history_size=0, pane_height=24)
 
 
-def test_tool_specs_has_nine_tools():
-    assert len(TOOL_SPECS) == 9
+def test_tool_specs_has_fourteen_tools():
+    assert len(TOOL_SPECS) == 14
     names = {s["name"] for s in TOOL_SPECS}
     assert names == {
         "report_status",
@@ -62,6 +62,11 @@ def test_tool_specs_has_nine_tools():
         "wait_for",
         "spawn_teammate",
         "notify",
+        "request_route",
+        "write_heartbeat",
+        "emit_dream_candidate",
+        "register_interest",
+        "query_interests",
     }
 
 
@@ -69,6 +74,10 @@ def test_resolve_allowed_tools_for_worker_profile():
     assert resolve_allowed_tools(tool_profile="worker") == (
         "export_summary",
         "register_capabilities",
+        "write_heartbeat",
+        "emit_dream_candidate",
+        "register_interest",
+        "query_interests",
     )
 
 
@@ -83,6 +92,10 @@ def test_runtime_filters_tools_by_profile(tmp_path):
     assert [spec["name"] for spec in runtime.list_tool_specs()] == [
         "export_summary",
         "register_capabilities",
+        "write_heartbeat",
+        "emit_dream_candidate",
+        "register_interest",
+        "query_interests",
     ]
 
 
@@ -104,11 +117,84 @@ def test_report_status_and_request_task(tmp_path):
     assert (tmp_path / "workspace" / "tasks" / "pending" / "task-001.md").exists()
 
 
+def test_request_task_writes_task_packet_and_reference(tmp_path):
+    runtime = AipToolRuntime(str(tmp_path / "workspace"), "architect", tool_profile="manager")
+
+    result = json.loads(
+        runtime.execute(
+            "request_task",
+            {
+                "task_description": "Implement auth module",
+                "target_role": "coder",
+                "task_packet": {
+                    "task_class": "implementation.auth",
+                    "risk_tier": "LOCAL",
+                    "relationship": "subtask",
+                    "capability_profile": "balanced",
+                    "provenance": {"chain_depth": 2},
+                },
+            },
+        )
+    )
+
+    task_path = tmp_path / "workspace" / "tasks" / "pending" / "task-001.md"
+    packet_path = tmp_path / "workspace" / "tasks" / "packets" / "task-001.json"
+    task_text = task_path.read_text(encoding="utf-8")
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+
+    assert result["task_id"] == "task-001"
+    assert result["task_packet_ref"] == "tasks/packets/task-001.json"
+    assert "task_packet_ref: tasks/packets/task-001.json" in task_text
+    assert "chain_depth: 2" in task_text
+    assert packet["task_class"] == "implementation.auth"
+    assert packet["risk_tier"] == "LOCAL"
+    assert packet["instructions"] == "Implement auth module"
+    assert packet["provenance"]["written_by"] == "architect"
+
+
+def test_request_route_writes_minimal_task_packet(tmp_path):
+    runtime = AipToolRuntime(str(tmp_path / "workspace"), "architect", tool_profile="architect")
+
+    result = json.loads(
+        runtime.execute(
+            "request_route",
+            {
+                "task_id": "task-007",
+                "task_class": "analysis",
+                "risk_tier": "READ_ONLY",
+                "budget": {"max_cost_usd": 1.5, "max_tokens": 2000, "gate_mode": "soft"},
+            },
+        )
+    )
+
+    route_request = json.loads((tmp_path / "workspace" / result["file"]).read_text(encoding="utf-8"))
+    packet = json.loads((tmp_path / "workspace" / "tasks" / "packets" / "task-007.json").read_text(encoding="utf-8"))
+
+    assert result["task_packet_ref"] == "tasks/packets/task-007.json"
+    assert route_request["task_packet_ref"] == "tasks/packets/task-007.json"
+    assert route_request["budget"]["gate_mode"] == "soft"
+    assert packet["task_class"] == "analysis"
+    assert packet["risk_tier"] == "READ_ONLY"
+    assert packet["relationship"] == "subtask"
+    assert packet["budget"]["max_tokens"] == 2000
+
+
 def test_export_summary(tmp_path):
     runtime = AipToolRuntime(str(tmp_path / "workspace"), "coder")
     result = json.loads(runtime.execute("export_summary", {"content": "# Review\nAll good."}))
     assert result["file"].startswith("summaries/")
     assert (tmp_path / "workspace" / result["file"]).exists()
+    assert result["redactions"] == 0
+
+
+def test_export_summary_redacts_secrets(tmp_path):
+    runtime = AipToolRuntime(str(tmp_path / "workspace"), "coder")
+    content = "# Deploy\nused token ghp_abcdefghijklmnopqrstuvwxyz0123456789 to push"
+    result = json.loads(runtime.execute("export_summary", {"content": content}))
+    assert result["redactions"] == 1
+    written = (tmp_path / "workspace" / result["file"]).read_text()
+    assert "ghp_" not in written
+    assert "[REDACTED:github_token]" in written
 
 
 def test_report_progress(tmp_path):

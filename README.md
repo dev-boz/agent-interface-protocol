@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/dev-boz/agent-interface-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-boz/agent-interface-protocol/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Status: Work in Progress** — the core works and has 201 passing tests, but this is early-stage. Contributions, feedback, and new backend adapters are very welcome.
+> **Status: Work in Progress** — the core works and currently has 213 passing tests, plus 9 opt-in live checks that stay skipped by default. Contributions, feedback, and new backend adapters are very welcome.
 
 Provider-agnostic multi-agent orchestration with near-zero infrastructure. tmux handles process management, inter-process communication, and session persistence. A shared MCP server and filesystem workspace handle coordination. LLMs can already parse each other's natural-language output, so protocol normalization between agents may be unnecessary.
 
@@ -35,10 +35,27 @@ workspace/
 │   ├── pending/        ← unclaimed tasks
 │   ├── claimed/        ← in-progress (agent-name prefixed)
 │   ├── done/           ← completed
-│   └── failed/         ← move back to pending/ to retry
+│   ├── failed/         ← move back to pending/ to retry
+│   └── packets/        ← persisted IMX task packets
+├── transcripts/        ← normalized session transcripts
+├── gates/              ← file-backed review / advisor exchange
+├── locks/              ← resource lock files
+├── route-requests/     ← AIP → IMX routing requests
+├── route-decisions/    ← IMX → AIP routing outcomes
+├── dream-candidates/   ← gitmem Dream ingestion candidates
 ├── events.jsonl        ← append-only event log
 └── agent_tree.json     ← teammate hierarchy and parent/child links
 ```
+
+Heartbeat files (`HEARTBEAT-{agent}.md`) and presence sentinels (`{agent}.present`) live at the workspace root so liveness stays inspectable even without reading pane buffers.
+
+### File-Backed Routing Seam
+
+AIP can now emit IMX-ready routing artifacts directly from its MCP/runtime surfaces:
+
+- `request_task` can persist a full `task_packet` at `workspace/tasks/packets/{task_id}.json` and store the packet reference on the queued task.
+- `request_route` writes `workspace/route-requests/{task_id}.json`, always produces a minimal compatible task packet, and can merge richer packet fields such as budgets, worktree metadata, memory refs, and `chain_depth`.
+- IMX can consume those files with `imx route-aip` and write the resulting decision back to `workspace/route-decisions/{task_id}.json`.
 
 ### Three-Tier Memory
 
@@ -46,7 +63,7 @@ workspace/
 |---|---|---|---|
 | **Hot** | tmux pane buffers | `tmux capture-pane` | No (rolling window) |
 | **Event log** | `workspace/events.jsonl` | `tail -n 50` | Yes |
-| **Cold** | workspace files (summaries, status, tasks) | `cat` | Yes |
+| **Cold** | workspace files (summaries, status, tasks, routing artifacts) | `cat` | Yes |
 
 ### Read Hierarchy (Token Efficiency)
 
@@ -145,7 +162,7 @@ AIP_RUN_LIVE_TMUX=1 python -m pytest -q tests/integration/test_live_core.py
 AIP_RUN_LIVE_TMUX=1 AIP_RUN_LIVE_CLI=1 python -m pytest -q tests/integration/test_live_backends.py
 ```
 
-202 tests covering workspace primitives, task queue, hook normalization, MCP tools, CLI commands, multi-backend collaboration, and opt-in live tmux/CLI coverage. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+The suite currently spans 213 passing tests, plus 9 opt-in live checks that stay skipped by default, covering workspace primitives, queue and lock behavior, routing artifacts, hook normalization, MCP tools, CLI commands, multi-backend collaboration, and live tmux/CLI coverage. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Documentation
 

@@ -1,0 +1,19 @@
+schema_version: "0.6"
+# SSH remote-execution bridge template (spec §"SSH Remote Execution Bridge").
+# Pattern: a tmux session on the remote host plus a local relay pane that
+# streams events over SSH. Remote workloads survive connection drops because
+# they run in tmux on the remote host; reconnection resumes the session.
+harness: ssh-remote
+transport: ssh
+host: "{{SSH_HOST}}"
+tmux_session: aip-remote
+event_map:
+  session_start: SessionStart
+  pre_tool_use: PreToolUse
+  post_tool_use: PostToolUse
+  session_end: SessionEnd
+surfaces:
+  event_log: workspace/events.jsonl
+  task_root: workspace/tasks
+  status_file: workspace/status/remote.json
+init_script: ".aip/bridges/ssh-init.sh"

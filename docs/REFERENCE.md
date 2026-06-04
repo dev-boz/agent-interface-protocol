@@ -257,11 +257,12 @@ The exact config location varies per CLI. For Gemini, Kiro, Codex, Cursor, and Q
 
 | Profile | Intended Use | Tools |
 |---|---|---|
-| `full` / `orchestrator` | broad control surface | all 9 tools |
-| `worker` | hook-capable execution agents | `export_summary`, `register_capabilities` |
-| `worker-hookless` | workers on CLIs without hooks | `report_status`, `report_progress`, `export_summary`, `register_capabilities` |
-| `reviewer` / `architect` | advisory agents | `export_summary`, `read_pane`, `notify`, `register_capabilities` |
-| `manager` | delegation-heavy coordinators | `export_summary`, `register_capabilities`, `read_pane`, `request_task`, `wait_for`, `spawn_teammate` |
+| `full` / `orchestrator` | broad control surface | all 14 tools |
+| `worker` | hook-capable execution agents | `export_summary`, `register_capabilities`, `write_heartbeat`, `emit_dream_candidate`, `register_interest`, `query_interests` |
+| `worker-hookless` | workers on CLIs without hooks | `report_status`, `report_progress`, `export_summary`, `register_capabilities`, `write_heartbeat` |
+| `reviewer` | advisory agents | `export_summary`, `read_pane`, `notify`, `register_capabilities`, `emit_dream_candidate` |
+| `architect` | routing and review agents | `export_summary`, `read_pane`, `notify`, `register_capabilities`, `request_route`, `emit_dream_candidate`, `register_interest`, `query_interests` |
+| `manager` | delegation-heavy coordinators | `export_summary`, `register_capabilities`, `read_pane`, `request_task`, `wait_for`, `spawn_teammate`, `request_route`, `write_heartbeat`, `emit_dream_candidate`, `register_interest`, `query_interests` |
 
 Hook-capable workers should use hooks for lifecycle/status telemetry. `report_status` and `report_progress` remain as fallback tools for hookless CLIs.
 
@@ -373,8 +374,10 @@ Create a task in the pending queue for another agent to pick up.
 | `context` | string | | Reference to summaries or files |
 | `priority` | string | | `high`, `normal`, `low` |
 | `blocked_by` | string[] | | Task IDs that must complete before this task is claimable |
+| `task_packet` | object | | Optional IMX task packet written to `workspace/tasks/packets/{task_id}.json` and referenced from the queued task |
 
 **Writes**: `workspace/tasks/pending/{task_id}.md`
+**May write**: `workspace/tasks/packets/{task_id}.json`
 **Appends**: `workspace/events.jsonl`
 
 ```json
@@ -393,6 +396,23 @@ With dependencies:
   "target_role": "tester",
   "priority": "normal",
   "blocked_by": ["task-041", "task-043"]
+}
+```
+
+With an IMX task packet:
+```json
+{
+  "task_description": "implement the auth module",
+  "target_role": "coder",
+  "task_packet": {
+    "task_class": "implementation.auth",
+    "risk_tier": "LOCAL",
+    "relationship": "subtask",
+    "capability_profile": "balanced",
+    "provenance": {
+      "chain_depth": 1
+    }
+  }
 }
 ```
 
@@ -451,6 +471,34 @@ Block until a matching event appears in `workspace/events.jsonl` or a timeout ex
 
 ```json
 {"event_filter": "agent:coder,status:finished", "timeout": 30}
+```
+
+#### `request_route`
+
+Emit a route request for IMX and persist a matching task packet so the router can make a decision from a file-backed contract instead of ad hoc arguments alone.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `task_id` | string | ✅ | Stable task identifier |
+| `task_class` | string | ✅ | Catalog task class, e.g. `implementation.bugfix` |
+| `risk_tier` | string | ✅ | `READ_ONLY`, `LOCAL`, or `EXTERNAL` |
+| `budget` | object | | Optional budget fields (`max_cost_usd`, `max_tokens`, `gate_mode`) |
+| `task_packet` | object | | Optional extra IMX packet fields to merge into the minimal packet AIP writes |
+
+**Writes**: `workspace/route-requests/{task_id}.json`, `workspace/tasks/packets/{task_id}.json`
+**Appends**: `workspace/events.jsonl`
+
+```json
+{
+  "task_id": "task-042",
+  "task_class": "implementation.bugfix",
+  "risk_tier": "LOCAL",
+  "budget": {
+    "max_cost_usd": 2.5,
+    "max_tokens": 12000,
+    "gate_mode": "soft"
+  }
+}
 ```
 
 #### `spawn_teammate`

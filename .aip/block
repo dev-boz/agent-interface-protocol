@@ -1,0 +1,29 @@
+# AIP block patterns — dangerous commands to auto-deny
+# One Python regex per line. Matched against full command context.
+
+# Filesystem destruction
+rm\s+-rf?\s+/
+rm\s+-rf?\s+~
+rm\s+--no-preserve-root
+
+# Git force operations on shared branches
+git\s+push\s+--force\b(?!.*--force-with-lease)
+git\s+push\s+-f\b
+git\s+reset\s+--hard\b
+
+# Database destructive operations
+DROP\s+TABLE\b
+DROP\s+DATABASE\b
+TRUNCATE\s+TABLE\b
+
+# Production write guard
+--env=production\b
+--environment=production\b
+NODE_ENV=production\b
+
+# Credential/secret exposure
+cat\s+.*\.env\b
+cat\s+.*credentials\b
+echo\s+.*PASSWORD\b
+echo\s+.*SECRET\b
+echo\s+.*TOKEN\b

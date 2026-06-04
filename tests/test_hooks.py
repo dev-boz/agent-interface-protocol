@@ -81,6 +81,57 @@ def test_pre_and_post_tool_use_write_tool_events(tmp_path):
     ]
 
 
+def test_pre_tool_use_blocks_dangerous_command(tmp_path):
+    # .aip/block lives next to the workspace dir (ws.parent/.aip/block)
+    block_dir = tmp_path / ".aip"
+    block_dir.mkdir()
+    (block_dir / "block").write_text("rm -rf .*\n")
+
+    runtime = HookRuntime(str(tmp_path / "workspace"), "coder")
+    result = runtime.emit("PreToolUse", {"tool": "bash", "command": "rm -rf .git"})
+
+    assert result["blocked"] is True
+    assert result["exit_code"] == 1
+    assert result["status"]["status"] == "blocked"
+
+    events = [json.loads(line) for line in runtime.workspace.events_path.read_text(encoding="utf-8").splitlines()]
+    deny = [e for e in events if e["event"] == "DENY"]
+    assert len(deny) == 1
+    assert deny[0]["status"] == "blocked"
+    assert deny[0]["reason"] == "dangerous_command"
+    assert deny[0]["data"]["command"] == "rm -rf .git"
+
+
+def test_pre_tool_use_allows_safe_command_with_block_file(tmp_path):
+    block_dir = tmp_path / ".aip"
+    block_dir.mkdir()
+    (block_dir / "block").write_text("rm -rf .*\n")
+
+    runtime = HookRuntime(str(tmp_path / "workspace"), "coder")
+    result = runtime.emit("PreToolUse", {"tool": "bash", "command": "ls -la"})
+
+    assert result.get("blocked") is not True
+    assert result["status"]["last_tool_status"] == "started"
+
+
+def test_pre_tool_use_blocks_nested_tool_input_command(tmp_path):
+    # Native hooks deliver the command as tool_input={"command": ...}; an
+    # anchored pattern must still match (regression for fail-open hole).
+    block_dir = tmp_path / ".aip"
+    block_dir.mkdir()
+    (block_dir / "block").write_text("^rm -rf /\n")
+
+    runtime = HookRuntime(str(tmp_path / "workspace"), "coder")
+    result = runtime.emit(
+        "PreToolUse",
+        {"tool": "bash", "tool_input": {"command": "rm -rf /"}},
+    )
+    assert result["blocked"] is True
+    events = [json.loads(line) for line in runtime.workspace.events_path.read_text().splitlines()]
+    deny = next(e for e in events if e["event"] == "DENY")
+    assert deny["data"]["command"] == "rm -rf /"
+
+
 def test_task_completed_and_session_end_update_status(tmp_path):
     runtime = HookRuntime(str(tmp_path / "workspace"), "reviewer")
 

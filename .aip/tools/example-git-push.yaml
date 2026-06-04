@@ -1,0 +1,26 @@
+schema_version: "0.6"
+tool_id: git_push
+description: >
+  Leaf tool conformance declaration for git push. Classified as EXTERNAL risk tier.
+  Requires an approval record before execution.
+
+risk_tier: EXTERNAL
+
+capability_tags:
+  - deployment
+  - deployment.git_push
+
+telemetry: true
+
+pre_hooks:
+  - name: require-approval
+    description: "Block git push without ~/.imx/state/approvals/{task_id}.json"
+    script: ".aip/hooks/require-imx-approval.sh"
+    on_fail: DENY
+  - name: require-demo-artifact
+    description: "Block git push without artifacts/demo/{task_id}.md"
+    script: ".aip/hooks/require-demo-artifact.sh"
+    on_fail: DENY
+
+timeout_seconds: 120
+capture_output: true
