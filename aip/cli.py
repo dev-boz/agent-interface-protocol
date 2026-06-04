@@ -229,7 +229,6 @@ def build_parser() -> argparse.ArgumentParser:
     context_build = context_subparsers.add_parser("build")
     context_build.add_argument("--task-class", required=True)
     context_build.add_argument("--task-id", required=True)
-    context_build.add_argument("--workspace-root", default="workspace")
     context_build.add_argument("--config-dir", default=".aip/context")
     context_build.add_argument("--repo-root", default=".")
     context_build.add_argument("--roles-dir", default=None)
@@ -240,10 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan_subparsers = plan_parser.add_subparsers(dest="plan_command", required=True)
     plan_status = plan_subparsers.add_parser("status")
     plan_status.add_argument("--task-id", required=True)
-    plan_status.add_argument("--workspace-root", default="workspace")
     plan_project = plan_subparsers.add_parser("project")
     plan_project.add_argument("--task-id", required=True)
-    plan_project.add_argument("--workspace-root", default="workspace")
 
     return parser
 
@@ -434,7 +431,13 @@ def main(argv: list[str] | None = None) -> int:
         results = {}
         total = 0
         for file_path in args.files:
-            reasons = redact_file(file_path)
+            try:
+                reasons = redact_file(file_path)
+            except OSError as exc:
+                # aip-redact runs from hooks over files that may not exist; skip
+                # and report rather than aborting the whole batch.
+                results[file_path] = {"error": str(exc)}
+                continue
             results[file_path] = reasons
             total += sum(reasons.values())
         print(json.dumps({"files": results, "total_redactions": total}, indent=2))

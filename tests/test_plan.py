@@ -141,13 +141,13 @@ def test_cli_plan_project_and_status(tmp_path, capsys):
         "    depends_on: [design]\n"
     )
 
-    rc = main(["plan", "project", "--task-id", "task-042", "--workspace-root", str(ws_root)])
+    rc = main(["--workspace-root", str(ws_root), "plan", "project", "--task-id", "task-042"])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["projected"] == ["design"]
     assert out["states"]["backend"] == "blocked"
 
-    rc = main(["plan", "status", "--task-id", "task-042", "--workspace-root", str(ws_root)])
+    rc = main(["--workspace-root", str(ws_root), "plan", "status", "--task-id", "task-042"])
     assert rc == 0
     status = json.loads(capsys.readouterr().out)
     assert status["states"]["design"] == "ready"

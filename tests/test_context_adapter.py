@@ -76,6 +76,14 @@ def test_role_card_resolved_when_present(tmp_path):
     assert "Role card: reviewer" in rendered
 
 
+def test_task_packet_respects_budget(tmp_path):
+    # A large injected task packet must not blow the budget (regression).
+    config = {"task_class": "impl", "max_context_tokens": 5, "inject_task_packet": True, "sources": []}
+    packet = {"blob": "x" * 1000}
+    pack = build_context_pack(config, task_id="t-b", repo_root=tmp_path, task_packet=packet)
+    assert pack.used_tokens <= 5
+
+
 def test_budget_truncates_oversized_source(tmp_path):
     big = "x" * 1000
     (tmp_path / "CONVENTIONS.md").write_text(big)
@@ -130,10 +138,10 @@ def test_cli_context_build(tmp_path, capsys):
     )
     (tmp_path / "CONVENTIONS.md").write_text("Rules here.\n")
     rc = main([
+        "--workspace-root", str(tmp_path / "workspace"),
         "context", "build",
         "--task-class", "impl",
         "--task-id", "t-8",
-        "--workspace-root", str(tmp_path / "workspace"),
         "--config-dir", str(config_dir),
         "--repo-root", str(tmp_path),
     ])

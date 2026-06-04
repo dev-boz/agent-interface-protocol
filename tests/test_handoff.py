@@ -122,6 +122,18 @@ def test_hook_ignores_non_external_handoff(tmp_path):
     assert result.get("blocked") is not True
 
 
+def test_hook_blocks_bad_handoff_nested_tool_input(tmp_path):
+    # Native hooks may nest the packet under tool_input (regression for
+    # fail-open hole where a nested packet skipped validation).
+    runtime = HookRuntime(str(tmp_path / "workspace"), "coder")
+    bad = _good_packet(5)
+    result = runtime.emit(
+        "PreToolUse",
+        {"tool": "write_handoff_packet", "tool_input": {"handoff_packet": bad}, "incoming_chain_depth": 0},
+    )
+    assert result["blocked"] is True
+
+
 def test_hook_reads_incoming_depth_from_current_json(tmp_path):
     ws = tmp_path / "workspace"
     (ws / "tasks").mkdir(parents=True)

@@ -91,6 +91,27 @@ def _first_non_empty(payload: dict[str, Any], *keys: str) -> str | None:
     return None
 
 
+def _extract_command(payload: dict[str, Any]) -> str:
+    """Extract the command string from a PreToolUse payload.
+
+    Native hooks (e.g. Claude Code) deliver the command nested as
+    ``tool_input={"command": "..."}``; stringifying that dict would defeat
+    anchored block patterns, so the nested value is pulled out explicitly.
+    """
+    tool_input = payload.get("tool_input")
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    if isinstance(tool_input, dict):
+        nested = _first_non_empty(tool_input, "command")
+        if nested:
+            return nested
+    return (
+        _first_non_empty(payload, "command")
+        or _first_non_empty(data, "command")
+        or (_first_non_empty(payload, "tool_input") if not isinstance(tool_input, dict) else None)
+        or ""
+    )
+
+
 class HookRuntime:
     def __init__(self, workspace_root: str, agent_name: str) -> None:
         self.workspace = AipWorkspace(workspace_root)
@@ -206,10 +227,7 @@ class HookRuntime:
         """
         if not self._block_rules:
             return None
-        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-        command = _first_non_empty(payload, "command", "tool_input") or _first_non_empty(
-            data, "command"
-        ) or ""
+        command = _extract_command(payload)
         rule = match_block(command, self._block_rules)
         if rule is None:
             return None
@@ -269,9 +287,12 @@ class HookRuntime:
         if tool != "write_handoff_packet":
             return None
         data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
         packet = payload.get("handoff_packet")
         if not isinstance(packet, dict):
             packet = data.get("handoff_packet")
+        if not isinstance(packet, dict):
+            packet = tool_input.get("handoff_packet")
         if not isinstance(packet, dict):
             return None  # no packet to validate
         # The guard is scoped to EXTERNAL dispatch per spec.

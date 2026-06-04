@@ -127,14 +127,29 @@ def build_context_pack(
     pack = ContextPack(task_id=task_id, task_class=task_class, budget_tokens=budget)
     used = 0
 
-    # Optionally include the task packet first (structured context).
+    def _admit(resolved: ResolvedSource) -> None:
+        """Admit a source under the token budget, truncating/omitting as needed."""
+        nonlocal used
+        remaining = budget - used if budget else None
+        if remaining is not None and remaining <= 0:
+            resolved.omitted = "omitted: token budget exhausted"
+            resolved.text = ""
+            pack.sources.append(resolved)
+            return
+        if remaining is not None and resolved.tokens > remaining:
+            keep_chars = remaining * _CHARS_PER_TOKEN
+            resolved.text = resolved.text[:keep_chars] + "\n…[truncated to fit budget]"
+            resolved.tokens = remaining
+        used += resolved.tokens
+        pack.sources.append(resolved)
+
+    # Optionally include the task packet first (structured context) — it is
+    # budget-enforced like any other source so it cannot blow the budget.
     if config.get("inject_task_packet") and task_packet is not None:
         import json
 
         text = "```json\n" + json.dumps(task_packet, indent=2) + "\n```"
-        tokens = estimate_tokens(text)
-        pack.sources.append(ResolvedSource("task_packet", "Task packet", text, tokens))
-        used += tokens
+        _admit(ResolvedSource("task_packet", "Task packet", text, estimate_tokens(text)))
 
     for raw in config.get("sources", []):
         if not isinstance(raw, dict):
@@ -145,20 +160,7 @@ def build_context_pack(
         if resolved.omitted is not None:
             pack.sources.append(resolved)
             continue
-
-        remaining = budget - used if budget else None
-        if remaining is not None and remaining <= 0:
-            resolved.omitted = "omitted: token budget exhausted"
-            resolved.text = ""
-            pack.sources.append(resolved)
-            continue
-        if remaining is not None and resolved.tokens > remaining:
-            # Truncate to fit the remaining budget.
-            keep_chars = remaining * _CHARS_PER_TOKEN
-            resolved.text = resolved.text[:keep_chars] + "\n…[truncated to fit budget]"
-            resolved.tokens = remaining
-        used += resolved.tokens
-        pack.sources.append(resolved)
+        _admit(resolved)
 
     pack.used_tokens = used
     return pack

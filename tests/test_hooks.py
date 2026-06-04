@@ -114,6 +114,24 @@ def test_pre_tool_use_allows_safe_command_with_block_file(tmp_path):
     assert result["status"]["last_tool_status"] == "started"
 
 
+def test_pre_tool_use_blocks_nested_tool_input_command(tmp_path):
+    # Native hooks deliver the command as tool_input={"command": ...}; an
+    # anchored pattern must still match (regression for fail-open hole).
+    block_dir = tmp_path / ".aip"
+    block_dir.mkdir()
+    (block_dir / "block").write_text("^rm -rf /\n")
+
+    runtime = HookRuntime(str(tmp_path / "workspace"), "coder")
+    result = runtime.emit(
+        "PreToolUse",
+        {"tool": "bash", "tool_input": {"command": "rm -rf /"}},
+    )
+    assert result["blocked"] is True
+    events = [json.loads(line) for line in runtime.workspace.events_path.read_text().splitlines()]
+    deny = next(e for e in events if e["event"] == "DENY")
+    assert deny["data"]["command"] == "rm -rf /"
+
+
 def test_task_completed_and_session_end_update_status(tmp_path):
     runtime = HookRuntime(str(tmp_path / "workspace"), "reviewer")
 
