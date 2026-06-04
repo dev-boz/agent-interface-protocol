@@ -343,6 +343,92 @@ def test_append_event_without_registry_is_unchanged(tmp_path):
     assert "interested_agents" not in event
 
 
+def test_derive_activity_idle_when_no_claim_and_present(tmp_path):
+    """Agent with presence sentinel but no claimed task → idle."""
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+    workspace.write_presence("coder")
+
+    record = workspace.derive_activity("coder")
+    assert record["agent"] == "coder"
+    assert record["state"] == "idle"
+    assert "derived_at" in record
+
+
+def test_derive_activity_running_with_fresh_heartbeat_and_claim(tmp_path):
+    """Agent with a claimed task and a fresh heartbeat → running."""
+    from aip.tasks import TaskQueue
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+    workspace.write_heartbeat("coder", status="working")
+    queue = TaskQueue(workspace)
+    task = queue.create_task(description="code the feature")
+    queue.claim_task(task.task_id, "coder")
+
+    record = workspace.derive_activity("coder")
+    assert record["state"] == "running"
+    assert "tasks/claimed/" in record["derived_from"]["claim"]
+    assert "heartbeat_age_seconds" in record
+
+
+def test_derive_activity_stalled_with_old_heartbeat_and_claim(tmp_path):
+    """Agent with a claimed task but a stale heartbeat → stalled."""
+    import time
+    from aip.tasks import TaskQueue
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+    # Write a heartbeat with a past timestamp
+    old_ts = "2000-01-01T00:00:00Z"
+    heartbeat_path = workspace.root / "HEARTBEAT-coder.md"
+    heartbeat_path.write_text(f"# HEARTBEAT — coder\nagent: coder\nstatus: working\nts: {old_ts}\n", encoding="utf-8")
+    queue = TaskQueue(workspace)
+    task = queue.create_task(description="long running task")
+    queue.claim_task(task.task_id, "coder")
+
+    record = workspace.derive_activity("coder", staleness_threshold_seconds=60)
+    assert record["state"] == "stalled"
+
+
+def test_derive_activity_needs_input_with_open_gate(tmp_path):
+    """Agent with a claim AND an open gate → needs-input."""
+    from aip.gates import write_gate
+    from aip.tasks import TaskQueue
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+    queue = TaskQueue(workspace)
+    task = queue.create_task(description="push to prod")
+    queue.claim_task(task.task_id, "coder")
+    write_gate(str(workspace.root), "coder", tool="bash", command="git push origin main")
+
+    record = workspace.derive_activity("coder")
+    assert record["state"] == "needs-input"
+    assert "gate" in record["derived_from"]
+
+
+def test_derive_activity_write_persists_activity_json(tmp_path):
+    """write=True persists {agent}-activity.json to the status directory."""
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+
+    workspace.derive_activity("coder", write=True)
+
+    activity_path = workspace.status_dir / "coder-activity.json"
+    assert activity_path.exists()
+    data = json.loads(activity_path.read_text(encoding="utf-8"))
+    assert data["agent"] == "coder"
+    assert data["state"] in {"running", "needs-input", "stalled", "idle", "done"}
+
+
+def test_derive_activity_done_when_finished_and_not_present(tmp_path):
+    """Agent with status=finished, no presence, no claim → done."""
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+    workspace.write_status("coder", status="finished")
+
+    record = workspace.derive_activity("coder")
+    assert record["state"] == "done"
+
+
 def test_append_event_registry_all_kind_matches_any_event(tmp_path):
     """An InterestKind.ALL subscription should match events of any type."""
     from aip.interest_maps import InterestRegistry, InterestSubscription, InterestKind

@@ -36,6 +36,10 @@ _EVENT_ALIASES = {
     "agentspawn": "subagent_start",
     "subagentstop": "subagent_stop",
     "subagent_stop": "subagent_stop",
+    # TeammateIdle fires when a Claude Code teammate goes idle. Map to session_end
+    # so the workspace records the agent as idle (spec §"Native Hooks" table).
+    "teammateidle": "session_end",
+    "teammate_idle": "session_end",
 }
 
 

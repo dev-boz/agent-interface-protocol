@@ -151,6 +151,78 @@ def test_agent_kill_requeues_claimed_tasks_and_removes_descendants(tmp_path, cap
     assert len(shutdown_events) == 4
 
 
+def test_task_create_command_writes_pending_file_and_returns_task(tmp_path, capsys):
+    """aip task create creates a task in pending/ and returns the task JSON."""
+    exit_code = main([
+        "--workspace-root", str(tmp_path / "workspace"),
+        "task", "create",
+        "--description", "implement oauth login",
+        "--task-type", "coding",
+        "--priority", "high",
+        "--target-role", "coder",
+    ])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["task_id"] == "task-001"
+    assert captured["description"] == "implement oauth login"
+    assert (tmp_path / "workspace" / "tasks" / "pending" / "task-001.md").exists()
+
+
+def test_task_create_with_blocked_by_and_explicit_id(tmp_path, capsys):
+    """aip task create accepts --blocked-by and --task-id flags."""
+    exit_code = main([
+        "--workspace-root", str(tmp_path / "workspace"),
+        "task", "create",
+        "--description", "add tests",
+        "--blocked-by", "task-001",
+        "--task-id", "task-002",
+    ])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["task_id"] == "task-002"
+    assert "task-001" in captured["blocked_by"]
+    task_text = (tmp_path / "workspace" / "tasks" / "pending" / "task-002.md").read_text(encoding="utf-8")
+    assert "blocked_by: task-001" in task_text
+
+
+def test_activity_derive_command_returns_5_state(tmp_path, capsys):
+    """aip activity derive returns the computed state JSON."""
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+    workspace.write_presence("coder")
+
+    exit_code = main([
+        "--workspace-root", str(tmp_path / "workspace"),
+        "activity", "derive", "coder",
+    ])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["agent"] == "coder"
+    assert captured["state"] in {"running", "needs-input", "stalled", "idle", "done"}
+    assert "derived_at" in captured
+
+
+def test_activity_derive_with_write_creates_activity_file(tmp_path, capsys):
+    """aip activity derive --write persists {agent}-activity.json."""
+    workspace = AipWorkspace(tmp_path / "workspace")
+    workspace.ensure()
+
+    exit_code = main([
+        "--workspace-root", str(tmp_path / "workspace"),
+        "activity", "derive", "coder", "--write",
+    ])
+
+    assert exit_code == 0
+    activity_path = tmp_path / "workspace" / "status" / "coder-activity.json"
+    assert activity_path.exists()
+    data = json.loads(activity_path.read_text(encoding="utf-8"))
+    assert data["agent"] == "coder"
+    assert data["state"] in {"running", "needs-input", "stalled", "idle", "done"}
+
+
 def test_agent_kill_preserves_tree_node_on_kill_failure(tmp_path, capsys, monkeypatch):
     fake_tmux = FakeTmuxController()
     fake_tmux.kill_failures.add("coder")
@@ -174,3 +246,55 @@ def test_agent_kill_preserves_tree_node_on_kill_failure(tmp_path, capsys, monkey
 
     # orchestrator kill succeeded → node should be removed
     assert "orchestrator" not in tree
+
+
+def _write_imx_profile(catalog_dir, name, risk_tiers):
+    profiles_dir = catalog_dir / "profiles"
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    lines = ["risk_tiers:"] + [f"  - {tier}" for tier in risk_tiers]
+    (profiles_dir / f"{name}.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_imx_profile_list_returns_sorted_profiles(tmp_path, capsys):
+    catalog = tmp_path / "catalog"
+    _write_imx_profile(catalog, "worker", ["READ_ONLY", "LOCAL"])
+    _write_imx_profile(catalog, "auditor", ["READ_ONLY"])
+
+    exit_code = main([
+        "--workspace-root", str(tmp_path / "workspace"),
+        "imx-profile", "list", "--catalog-dir", str(catalog),
+    ])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["profiles"] == ["auditor", "worker"]
+
+
+def test_imx_profile_check_risk_allowed(tmp_path, capsys):
+    catalog = tmp_path / "catalog"
+    _write_imx_profile(catalog, "worker", ["READ_ONLY", "LOCAL"])
+
+    exit_code = main([
+        "--workspace-root", str(tmp_path / "workspace"),
+        "imx-profile", "check-risk", "worker", "LOCAL", "--catalog-dir", str(catalog),
+    ])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["allowed"] is True
+    assert captured["profile_loaded"] is True
+
+
+def test_imx_profile_check_risk_denied_exits_nonzero(tmp_path, capsys):
+    catalog = tmp_path / "catalog"
+    _write_imx_profile(catalog, "worker", ["READ_ONLY", "LOCAL"])
+
+    exit_code = main([
+        "--workspace-root", str(tmp_path / "workspace"),
+        "imx-profile", "check-risk", "worker", "EXTERNAL", "--catalog-dir", str(catalog),
+    ])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert captured["allowed"] is False
+    assert "EXTERNAL" in captured["reason"]

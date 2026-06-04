@@ -335,6 +335,18 @@ def test_install_claude_code_hook_config_merges_existing_settings(tmp_path):
     assert "SubagentStop" in merged["hooks"]
 
 
+def test_teammate_idle_normalizes_to_session_end(tmp_path):
+    """TeammateIdle is a real Claude Code hook event; it must map to session_end
+    so the workspace records the agent as idle rather than raising HookError."""
+    assert normalize_hook_event("TeammateIdle") == "session_end"
+    assert normalize_hook_event("teammate_idle") == "session_end"
+
+    runtime = HookRuntime(str(tmp_path / "workspace"), "coder")
+    result = runtime.emit("TeammateIdle", {})
+    assert result["normalized_event"] == "session_end"
+    assert result["status"]["status"] == "idle"
+
+
 def test_install_copilot_hook_config_creates_config_file(tmp_path):
     config_root = tmp_path / "repo"
 

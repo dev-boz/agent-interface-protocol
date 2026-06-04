@@ -262,27 +262,121 @@ class AipWorkspace:
         path = self.root / f"{safe_name}.present"
         path.unlink(missing_ok=True)
 
-    def derive_activity(self, agent_name: str) -> dict:
-        """Derive activity state for an agent from status and heartbeat files."""
+    def _heartbeat_age_seconds(self, safe_name: str) -> float | None:
+        """Return how old the heartbeat file is in seconds, or None if absent."""
+        heartbeat_path = self.root / f"HEARTBEAT-{safe_name}.md"
+        if not heartbeat_path.exists():
+            return None
+        for line in heartbeat_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("ts: "):
+                ts_str = line[4:].strip()
+                try:
+                    ts = parse_isoformat(ts_str)
+                    return (utc_now() - ts).total_seconds()
+                except (ValueError, TypeError):
+                    return None
+        return None
+
+    def _last_heartbeat_ts(self, safe_name: str) -> str | None:
+        """Return the raw heartbeat timestamp string, or None if absent."""
+        heartbeat_path = self.root / f"HEARTBEAT-{safe_name}.md"
+        if not heartbeat_path.exists():
+            return None
+        for line in heartbeat_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("ts: "):
+                return line[4:].strip()
+        return None
+
+    def derive_activity(
+        self,
+        agent_name: str,
+        *,
+        staleness_threshold_seconds: float = 120,
+        write: bool = False,
+    ) -> dict:
+        """Derive a 5-state activity record for an agent from filesystem evidence.
+
+        States (spec §"Derived Activity State"):
+          running      — heartbeat fresh + at least one claimed task
+          needs-input  — claim active + open gate record present
+          stalled      — claim present but heartbeat older than staleness threshold
+          idle         — alive (present sentinel) with no active claim
+          done         — terminal: no active claim, not present, status == finished
+
+        When ``write=True``, persists the record to
+        ``workspace/status/{agent}-activity.json``.
+        """
         self.ensure()
         safe_name = sanitize_component(agent_name)
+
         status = self.read_json(self.status_dir / f"{safe_name}.json")
         present = (self.root / f"{safe_name}.present").exists()
-        heartbeat_path = self.root / f"HEARTBEAT-{safe_name}.md"
-        last_heartbeat: str | None = None
-        if heartbeat_path.exists():
-            for line in heartbeat_path.read_text(encoding="utf-8").splitlines():
-                if line.startswith("ts: "):
-                    last_heartbeat = line[4:].strip()
-                    break
-        return {
+        last_heartbeat = self._last_heartbeat_ts(safe_name)
+        heartbeat_age = self._heartbeat_age_seconds(safe_name)
+
+        # Determine whether there is at least one claimed task for this agent.
+        claimed_task: str | None = None
+        for path in sorted(self.claimed_dir.glob(f"{safe_name}-*.md")):
+            claimed_task = path.name
+            break
+
+        # Check for an open (unresolved) gate.
+        open_gate: str | None = None
+        if self.gates_dir.is_dir():
+            for path in sorted(self.gates_dir.glob(f"gate-{safe_name}-*.json")):
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    if not data.get("resolved", False):
+                        open_gate = path.name
+                        break
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        # Compute 5-state.
+        has_claim = claimed_task is not None
+        heartbeat_stale = (
+            heartbeat_age is not None
+            and heartbeat_age > staleness_threshold_seconds
+        )
+
+        if has_claim and open_gate:
+            state = "needs-input"
+        elif has_claim and heartbeat_stale:
+            state = "stalled"
+        elif has_claim:
+            state = "running"
+        elif present or status.get("status") == "working":
+            state = "idle"
+        elif status.get("status") == "finished":
+            state = "done"
+        else:
+            state = "idle"
+
+        derived_from: dict[str, Any] = {}
+        if last_heartbeat:
+            derived_from["heartbeat"] = f"HEARTBEAT-{safe_name}.md"
+        if claimed_task:
+            derived_from["claim"] = f"tasks/claimed/{claimed_task}"
+        if open_gate:
+            derived_from["gate"] = f"gates/{open_gate}"
+
+        record: dict[str, Any] = {
             "agent": agent_name,
-            "present": present,
-            "status": status.get("status", "unknown"),
-            "last_heartbeat": last_heartbeat,
-            "updated_at": status.get("updated_at"),
+            "state": state,
+            "derived_from": derived_from,
             "derived_at": isoformat_z(utc_now()),
         }
+        # Include auxiliary fields for diagnostics (non-authoritative).
+        if last_heartbeat:
+            record["last_heartbeat"] = last_heartbeat
+        if heartbeat_age is not None:
+            record["heartbeat_age_seconds"] = round(heartbeat_age, 1)
+
+        if write:
+            activity_path = self.status_dir / f"{safe_name}-activity.json"
+            atomic_write_json(activity_path, record)
+
+        return record
 
     @contextmanager
     def _lock_guard(self, safe_resource: str):

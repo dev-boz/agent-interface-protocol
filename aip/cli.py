@@ -152,6 +152,16 @@ def build_parser() -> argparse.ArgumentParser:
     task_list.add_argument("--claimable", action="store_true",
                            help="Only show tasks with no unresolved blocked_by dependencies")
 
+    create_parser = task_subparsers.add_parser("create")
+    create_parser.add_argument("--description", required=True)
+    create_parser.add_argument("--task-type", default="general")
+    create_parser.add_argument("--priority", default="normal")
+    create_parser.add_argument("--target-role")
+    create_parser.add_argument("--context")
+    create_parser.add_argument("--blocked-by", nargs="+", default=[])
+    create_parser.add_argument("--requested-by", default="system")
+    create_parser.add_argument("--task-id")
+
     reclaim_parser = task_subparsers.add_parser("reclaim-expired")
     reclaim_parser.add_argument("--json", action="store_true")
 
@@ -242,6 +252,47 @@ def build_parser() -> argparse.ArgumentParser:
     plan_project = plan_subparsers.add_parser("project")
     plan_project.add_argument("--task-id", required=True)
 
+    worktree_parser = subparsers.add_parser("worktree", help="Manage git worktrees for mutation tasks")
+    worktree_subparsers = worktree_parser.add_subparsers(dest="worktree_command", required=True)
+
+    wt_provision = worktree_subparsers.add_parser("provision")
+    wt_provision.add_argument("task_id")
+    wt_provision.add_argument("agent_id")
+    wt_provision.add_argument("--repo-root", default=None)
+    wt_provision.add_argument("--branch-prefix", default="task")
+
+    wt_remove = worktree_subparsers.add_parser("remove")
+    wt_remove.add_argument("task_id")
+    wt_remove.add_argument("--repo-root", default=None)
+    wt_remove.add_argument("--force", action="store_true")
+
+    worktree_subparsers.add_parser("list")
+
+    activity_parser = subparsers.add_parser("activity", help="Derive and write agent activity state")
+    activity_subparsers = activity_parser.add_subparsers(dest="activity_command", required=True)
+    activity_derive = activity_subparsers.add_parser("derive")
+    activity_derive.add_argument("agent_name")
+    activity_derive.add_argument("--staleness-threshold", type=float, default=120.0)
+    activity_derive.add_argument("--write", action="store_true",
+                                 help="Persist {agent}-activity.json alongside status files")
+
+    imx_profile_parser = subparsers.add_parser(
+        "imx-profile", help="Inspect IMX capability profiles in the catalog"
+    )
+    imx_profile_subparsers = imx_profile_parser.add_subparsers(
+        dest="imx_profile_command", required=True
+    )
+    imx_list = imx_profile_subparsers.add_parser("list", help="List available IMX profiles")
+    imx_list.add_argument("--catalog-dir", default=None,
+                          help="IMX catalog directory (default: ~/.imx/catalog)")
+    imx_check = imx_profile_subparsers.add_parser(
+        "check-risk", help="Check whether a risk tier is permitted by an IMX profile"
+    )
+    imx_check.add_argument("profile")
+    imx_check.add_argument("risk_tier")
+    imx_check.add_argument("--catalog-dir", default=None,
+                           help="IMX catalog directory (default: ~/.imx/catalog)")
+
     return parser
 
 
@@ -313,6 +364,19 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 tasks = [asdict(task) for task in queue.list_tasks(stage=args.stage)]
             print(json.dumps(tasks, indent=2))
+            return 0
+        if args.task_command == "create":
+            task = queue.create_task(
+                description=args.description,
+                task_type=args.task_type,
+                priority=args.priority,
+                target_role=args.target_role,
+                context=args.context,
+                requested_by=args.requested_by,
+                blocked_by=args.blocked_by or None,
+                task_id=args.task_id,
+            )
+            print(json.dumps(asdict(task), indent=2))
             return 0
         if args.task_command == "reclaim-expired":
             reclaimed = queue.reclaim_expired()
@@ -474,6 +538,79 @@ def main(argv: list[str] | None = None) -> int:
             states = node_states(plan, task_tree(workspace, args.task_id))
             print(json.dumps({"task_id": plan.task_id, "projected": projected, "states": states}, indent=2))
             return 0
+
+    if args.command_group == "worktree":
+        from pathlib import Path
+        from .worktree import provision_worktree, remove_worktree, list_worktrees
+
+        workspace = AipWorkspace(args.workspace_root)
+        repo_root = Path(args.repo_root) if getattr(args, "repo_root", None) else None
+
+        if args.worktree_command == "provision":
+            info = provision_worktree(
+                workspace,
+                args.task_id,
+                args.agent_id,
+                repo_root=repo_root,
+                branch_prefix=args.branch_prefix,
+            )
+            print(json.dumps({
+                "task_id": info.task_id,
+                "agent_id": info.agent_id,
+                "worktree_path": info.worktree_path,
+                "branch": info.branch,
+                "created_at": info.created_at,
+            }, indent=2))
+            return 0
+        if args.worktree_command == "remove":
+            removed = remove_worktree(
+                workspace,
+                args.task_id,
+                repo_root=repo_root,
+                force=args.force,
+            )
+            print(json.dumps({"task_id": args.task_id, "removed": removed}, indent=2))
+            return 0
+        if args.worktree_command == "list":
+            entries = list_worktrees(workspace)
+            print(json.dumps(entries, indent=2))
+            return 0
+
+    if args.command_group == "activity" and args.activity_command == "derive":
+        workspace = AipWorkspace(args.workspace_root)
+        record = workspace.derive_activity(
+            args.agent_name,
+            staleness_threshold_seconds=args.staleness_threshold,
+            write=args.write,
+        )
+        print(json.dumps(record, indent=2))
+        return 0
+
+    if args.command_group == "imx-profile":
+        from pathlib import Path
+        from .imx_profile import (
+            check_risk_tier_allowed,
+            list_available_profiles,
+            load_imx_profile,
+        )
+
+        catalog_dir = Path(args.catalog_dir) if getattr(args, "catalog_dir", None) else None
+
+        if args.imx_profile_command == "list":
+            profiles = list_available_profiles(catalog_dir=catalog_dir)
+            print(json.dumps({"profiles": profiles}, indent=2))
+            return 0
+        if args.imx_profile_command == "check-risk":
+            constraints = load_imx_profile(args.profile, catalog_dir=catalog_dir)
+            allowed, reason = check_risk_tier_allowed(args.risk_tier, constraints)
+            print(json.dumps({
+                "profile": args.profile,
+                "risk_tier": args.risk_tier,
+                "allowed": allowed,
+                "reason": reason,
+                "profile_loaded": constraints.loaded,
+            }, indent=2))
+            return 0 if allowed else 1
 
     raise AssertionError("Unhandled command")
 
