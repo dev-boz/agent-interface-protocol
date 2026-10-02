@@ -72,6 +72,11 @@ def test_live_mcp_tool_surface(live_tmux_env) -> None:
             "wait_for",
             "spawn_teammate",
             "notify",
+            "request_route",
+            "write_heartbeat",
+            "emit_dream_candidate",
+            "register_interest",
+            "query_interests",
         }
 
         status = client.call_tool("report_status", {"status": "working", "message": "live test"})
