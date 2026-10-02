@@ -5,12 +5,9 @@ import sys
 import threading
 from pathlib import Path
 
-from aip.workspace import AipWorkspace, atomic_write_text
+import pytest
 
-# Make IMX importable without requiring it to be installed
-_IMX_PATH = Path("/home/dev-boz/projects/IMX")
-if _IMX_PATH.exists() and str(_IMX_PATH) not in sys.path:
-    sys.path.insert(0, str(_IMX_PATH))
+from aip.workspace import AipWorkspace, atomic_write_text
 
 
 def _acquire_lock_in_subprocess(workspace_root: str, barrier, results, holder: str) -> None:
@@ -253,7 +250,9 @@ def test_full_flow_append_event_correlate_telemetry(tmp_path):
     Uses tmp_path only; no mocks.  Verifies that task data written via
     append_event flows through correlation and lands verbatim in tasks.jsonl.
     """
-    from imx.correlation import correlate_workspace
+    # IMX requires Python >=3.11 and is an optional cross-project integration.
+    # CI explicitly installs and imports it in the >=3.11 matrix before testing.
+    correlate_workspace = pytest.importorskip("imx.correlation").correlate_workspace
     from imx.telemetry import append_task_record  # noqa: F401 — import-only verify
 
     workspace = AipWorkspace(tmp_path / "workspace")
