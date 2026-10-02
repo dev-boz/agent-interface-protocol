@@ -9,7 +9,9 @@ description = "Filesystem and tmux primitives for multi-agent orchestration acro
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
-dependencies = ["mcp>=1.0.0"]
+# MCP 2.x removes the Server decorator API used by create_mcp_server.
+# Widen this range only after the opt-in live MCP suite passes on that SDK.
+dependencies = ["mcp>=1.0.0,<2"]
 keywords = ["agents", "ai", "orchestration", "tmux", "mcp", "multi-agent", "cli"]
 classifiers = [
     "Development Status :: 3 - Alpha",
